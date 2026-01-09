@@ -15,7 +15,6 @@ var (
 	useClaude bool
 	useGemini bool
 	useCodex  bool
-	useMulti  bool
 )
 
 var rootCmd = &cobra.Command{
@@ -32,10 +31,9 @@ The workflow consists of:
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVar(&useClaude, "claude", false, "Use/include Claude CLI")
-	rootCmd.PersistentFlags().BoolVar(&useGemini, "gemini", false, "Use/include Gemini CLI")
-	rootCmd.PersistentFlags().BoolVar(&useCodex, "codex", false, "Include Codex CLI (use with --claude/--gemini for multi-provider)")
-	rootCmd.PersistentFlags().BoolVar(&useMulti, "multi", false, "Use all three providers (Codex, Claude, Gemini)")
+	rootCmd.PersistentFlags().BoolVar(&useClaude, "claude", false, "Use Claude CLI")
+	rootCmd.PersistentFlags().BoolVar(&useGemini, "gemini", false, "Use Gemini CLI")
+	rootCmd.PersistentFlags().BoolVar(&useCodex, "codex", false, "Use Codex CLI (default if no flags)")
 }
 
 func Execute() error {
@@ -43,20 +41,10 @@ func Execute() error {
 }
 
 // enabledProviders returns a list of all enabled provider names
+// Multiple flags = multiple providers with automatic failover
 func enabledProviders() []string {
-	// --multi enables all three
-	if useMulti {
-		return []string{"codex", "claude", "gemini"}
-	}
-
 	var providers []string
 
-	// If no flags set, default to codex only
-	if !useClaude && !useGemini && !useCodex {
-		return []string{"codex"}
-	}
-
-	// Add explicitly enabled providers
 	if useCodex {
 		providers = append(providers, "codex")
 	}
@@ -67,8 +55,7 @@ func enabledProviders() []string {
 		providers = append(providers, "gemini")
 	}
 
-	// If only one of claude/gemini set without --codex, use just that one
-	// (backwards compatible behavior)
+	// Default to codex if no flags specified
 	if len(providers) == 0 {
 		return []string{"codex"}
 	}
@@ -76,15 +63,10 @@ func enabledProviders() []string {
 	return providers
 }
 
-// PrimaryBackend returns the name of the primary agent backend (for single-agent operations)
+// PrimaryBackend returns the name of the primary agent backend (first enabled provider)
 func PrimaryBackend() string {
-	if useClaude {
-		return "Claude"
-	}
-	if useGemini {
-		return "Gemini"
-	}
-	return "Codex"
+	providers := enabledProviders()
+	return strings.Title(providers[0])
 }
 
 // AgentBackend returns a description of enabled backends

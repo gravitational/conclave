@@ -26,11 +26,15 @@ Conclave runs a multi-stage security audit pipeline:
 
 ```bash
 go build ./cmd/conclave
-./conclave run             # Uses Codex CLI (default)
-./conclave --claude run    # Uses Claude CLI
-./conclave --gemini run    # Uses Gemini CLI
-./conclave --multi run     # Uses all three providers (agents distributed randomly)
+./conclave run                        # Uses Codex CLI (default)
+./conclave --claude run               # Uses Claude CLI
+./conclave --gemini run               # Uses Gemini CLI
+./conclave --claude --gemini run      # Uses both (distributed + failover)
+./conclave --claude --codex --gemini run  # Uses all three
 ```
+
+When multiple providers are enabled, parallel agents are distributed across them.
+If one provider errors or hits rate limits, agents automatically fail over to another.
 
 ## Requirements
 
