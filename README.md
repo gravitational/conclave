@@ -29,6 +29,7 @@ go build ./cmd/conclave
 ./conclave run             # Uses Codex CLI (default)
 ./conclave --claude run    # Uses Claude CLI
 ./conclave --gemini run    # Uses Gemini CLI
+./conclave --multi run     # Uses all three providers (agents distributed randomly)
 ```
 
 ## Requirements

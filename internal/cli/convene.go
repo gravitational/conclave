@@ -66,19 +66,18 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	printStatus("Loaded %d perspectives for subsystem: %s", len(perspectives), conveneSubsystem)
 	printStatus("")
 
-	// Create agents
-	createAgent := CreateAgent
-	printStatus("Using %s CLI for debate...", AgentBackend())
-
-	// Generate debate prompts
-	debateGen := convene.NewDebateGenerator(createAgent())
+	// Generate debate prompts using primary LLM
+	printStatus("Using %s CLI for prompt generation...", PrimaryBackend())
+	debateGen := convene.NewDebateGenerator(CreateAgent())
 	prompts, err := debateGen.GeneratePrompts(p, conveneSubsystem, perspectives)
 	if err != nil {
 		return fmt.Errorf("failed to generate debate prompts: %w", err)
 	}
 
+	// Distribute agents across enabled providers
+	agents := DistributeAgents(3)
 	printStatus("")
-	printStatus("Starting debate with 3 agents...")
+	printStatus("Starting debate with 3 agents (%s)...", DescribeDistribution(agents))
 	printStatus("")
 
 	// Run 3 agents in parallel
@@ -90,8 +89,8 @@ func runConvene(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ag := createAgent()
-			prefix := fmt.Sprintf("Debater %d", idx+1)
+			ag := agents[idx]
+			prefix := fmt.Sprintf("Debater %d [%s]", idx+1, ag.Name())
 
 			debates[idx] = agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
 		}(i)

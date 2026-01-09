@@ -60,11 +60,8 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
-	// Create agent factory
-	createAgent := CreateAgent
-
 	printStatus("=== CONCLAVE FULL AUDIT ===")
-	printStatus("Using %s CLI", AgentBackend())
+	printStatus("Primary: %s | Parallel agents: %s", PrimaryBackend(), AgentBackend())
 	printStatus("")
 
 	// STEP 1: Plan (or load existing)
@@ -75,7 +72,7 @@ func runFull(cmd *cobra.Command, args []string) error {
 		printStatus("No existing plan found, creating new plan...")
 		printStatus("")
 
-		generator := plan.NewGenerator(createAgent(), st)
+		generator := plan.NewGenerator(CreateAgent(), st)
 		p, err = generator.Generate(absPath)
 		if err != nil {
 			return fmt.Errorf("failed to generate plan: %w", err)
@@ -96,14 +93,16 @@ func runFull(cmd *cobra.Command, args []string) error {
 	printStatus("Selected subsystem: %s", subsystem.Name)
 	printStatus("")
 
-	// Generate assessment prompts
-	promptGen := assess.NewPromptGenerator(createAgent())
+	// Generate assessment prompts using primary agent
+	promptGen := assess.NewPromptGenerator(CreateAgent())
 	prompts, err := promptGen.GeneratePrompts(p, subsystem)
 	if err != nil {
 		return fmt.Errorf("failed to generate prompts: %w", err)
 	}
 
-	printStatus("Running 3 parallel assessment agents...")
+	// Distribute agents across enabled providers
+	assessAgents := DistributeAgents(3)
+	printStatus("Running 3 parallel assessment agents (%s)...", DescribeDistribution(assessAgents))
 	printStatus("")
 
 	var wg sync.WaitGroup
@@ -114,8 +113,8 @@ func runFull(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ag := createAgent()
-			prefix := fmt.Sprintf("Agent %d", idx+1)
+			ag := assessAgents[idx]
+			prefix := fmt.Sprintf("Agent %d [%s]", idx+1, ag.Name())
 			perspectives[idx] = agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
 		}(i)
 	}
@@ -132,14 +131,17 @@ func runFull(cmd *cobra.Command, args []string) error {
 
 	// STEP 3: Convene
 	printStatus("=== STEP 3: CONVENE ===")
-	printStatus("Running 3 parallel debate agents...")
-	printStatus("")
 
-	debateGen := convene.NewDebateGenerator(createAgent())
+	debateGen := convene.NewDebateGenerator(CreateAgent())
 	debatePrompts, err := debateGen.GeneratePrompts(p, subsystem.Slug, perspectives)
 	if err != nil {
 		return fmt.Errorf("failed to generate debate prompts: %w", err)
 	}
+
+	// Distribute agents across enabled providers
+	debateAgents := DistributeAgents(3)
+	printStatus("Running 3 parallel debate agents (%s)...", DescribeDistribution(debateAgents))
+	printStatus("")
 
 	debates := make([]string, 3)
 	debateColors := []string{agent.ColorMagenta, agent.ColorCyan, agent.ColorYellow}
@@ -148,8 +150,8 @@ func runFull(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ag := createAgent()
-			prefix := fmt.Sprintf("Debater %d", idx+1)
+			ag := debateAgents[idx]
+			prefix := fmt.Sprintf("Debater %d [%s]", idx+1, ag.Name())
 			debates[idx] = agent.StreamWithPrefix(ag, debatePrompts[idx], prefix, debateColors[idx])
 		}(i)
 	}
@@ -166,11 +168,11 @@ func runFull(cmd *cobra.Command, args []string) error {
 
 	// STEP 4: Complete
 	printStatus("=== STEP 4: COMPLETE ===")
-	printStatus("Synthesizing final results...")
+	printStatus("Synthesizing final results with %s...", PrimaryBackend())
 	printStatus("")
 
 	synthesisPrompt := generateSynthesisPrompt(p, subsystem, debates)
-	result := agent.StreamWithPrefix(createAgent(), synthesisPrompt, "Synthesis", agent.ColorWhite)
+	result := agent.StreamWithPrefix(CreateAgent(), synthesisPrompt, "Synthesis", agent.ColorWhite)
 
 	// Save result
 	resultPath, err := st.SaveResult(p.ID, subsystem.Slug, result)

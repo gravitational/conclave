@@ -75,19 +75,18 @@ func runAssess(cmd *cobra.Command, args []string) error {
 	printStatus("Assessing subsystem: %s", subsystem.Name)
 	printStatus("")
 
-	// Create agents
-	createAgent := CreateAgent
-	printStatus("Using %s CLI for assessment...", AgentBackend())
-
-	// Generate assessment prompts using LLM
-	promptGen := assess.NewPromptGenerator(createAgent())
+	// Generate assessment prompts using primary LLM
+	printStatus("Using %s CLI for prompt generation...", PrimaryBackend())
+	promptGen := assess.NewPromptGenerator(CreateAgent())
 	prompts, err := promptGen.GeneratePrompts(p, subsystem)
 	if err != nil {
 		return fmt.Errorf("failed to generate assessment prompts: %w", err)
 	}
 
+	// Distribute agents across enabled providers
+	agents := DistributeAgents(3)
 	printStatus("")
-	printStatus("Starting 3 parallel agents...")
+	printStatus("Starting 3 parallel agents (%s)...", DescribeDistribution(agents))
 	printStatus("")
 
 	// Run 3 agents in parallel
@@ -99,8 +98,8 @@ func runAssess(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ag := createAgent()
-			prefix := fmt.Sprintf("Agent %d", idx+1)
+			ag := agents[idx]
+			prefix := fmt.Sprintf("Agent %d [%s]", idx+1, ag.Name())
 
 			output := agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
 			perspectives[idx] = &assess.Perspective{

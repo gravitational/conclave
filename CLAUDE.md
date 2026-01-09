@@ -33,6 +33,11 @@ conclave status                   # Show analysis state
 # Use Claude or Gemini CLI instead of Codex (default)
 conclave --claude run
 conclave --gemini run
+
+# Multi-provider mode: distribute parallel agents across providers
+conclave --multi run                    # All three providers
+conclave --claude --gemini run          # Claude + Gemini
+conclave --claude --codex run           # Claude + Codex
 ```
 
 ## Architecture
