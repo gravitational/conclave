@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -10,12 +12,13 @@ import (
 type MessageType string
 
 const (
-	MsgAgentStatus MessageType = "agent_status"
-	MsgAgentLog    MessageType = "agent_log"
-	MsgPhaseChange MessageType = "phase_change"
-	MsgError       MessageType = "error"
-	MsgCommand     MessageType = "command"
-	MsgCommandAck  MessageType = "command_ack"
+	MsgAgentStatus   MessageType = "agent_status"
+	MsgAgentLog      MessageType = "agent_log"
+	MsgPhaseChange   MessageType = "phase_change"
+	MsgPhaseComplete MessageType = "phase_complete"
+	MsgError         MessageType = "error"
+	MsgCommand       MessageType = "command"
+	MsgCommandAck    MessageType = "command_ack"
 )
 
 // CommandData holds a control command from the frontend
@@ -66,8 +69,30 @@ type AgentLogData struct {
 
 // PhaseData holds phase change info
 type PhaseData struct {
-	Phase       string `json:"phase"` // plan, assess, convene, synthesize
+	Phase       string `json:"phase"` // plan, assess, debate, synthesize
 	Description string `json:"description"`
+}
+
+// PhaseCompleteData holds complete phase data for timeline
+type PhaseCompleteData struct {
+	Phase       string               `json:"phase"`
+	Description string               `json:"description"`
+	StartTime   time.Time            `json:"startTime"`
+	EndTime     time.Time            `json:"endTime"`
+	Agents      []AgentCompleteData  `json:"agents"`
+}
+
+// AgentCompleteData holds agent data with full output
+type AgentCompleteData struct {
+	ID        int        `json:"id"`
+	Name      string     `json:"name"`
+	Provider  string     `json:"provider"`
+	Model     string     `json:"model,omitempty"`
+	State     string     `json:"state"`
+	Lines     int        `json:"lines"`
+	Output    string     `json:"output"`
+	StartTime time.Time  `json:"startTime"`
+	EndTime   *time.Time `json:"endTime,omitempty"`
 }
 
 // Hub manages WebSocket connections and broadcasts
@@ -85,6 +110,11 @@ type Hub struct {
 	phaseDesc   string
 	logs        map[int][]string // agentID -> last N log lines
 	maxLogLines int
+
+	// Phase history for timeline
+	phaseStartTime time.Time
+	agentOutput    map[int]*strings.Builder // Full accumulated output per agent
+	phaseHistory   []PhaseCompleteData      // Completed phases for timeline
 
 	// Control functions
 	killAgent AgentKiller
@@ -114,14 +144,16 @@ type WebSocketConn interface {
 // NewHub creates a new Hub
 func NewHub() *Hub {
 	return &Hub{
-		clients:     make(map[*Client]bool),
-		broadcast:   make(chan []byte, 256),
-		register:    make(chan *Client),
-		unregister:  make(chan *Client),
-		commands:    make(chan clientCommand, 16),
-		agents:      make(map[int]*AgentStatusData),
-		logs:        make(map[int][]string),
-		maxLogLines: 500,
+		clients:      make(map[*Client]bool),
+		broadcast:    make(chan []byte, 256),
+		register:     make(chan *Client),
+		unregister:   make(chan *Client),
+		commands:     make(chan clientCommand, 16),
+		agents:       make(map[int]*AgentStatusData),
+		logs:         make(map[int][]string),
+		maxLogLines:  500,
+		agentOutput:  make(map[int]*strings.Builder),
+		phaseHistory: make([]PhaseCompleteData, 0),
 	}
 }
 
@@ -233,7 +265,19 @@ func (h *Hub) SendCommand(client *Client, cmd CommandData) {
 }
 
 func (h *Hub) sendCurrentState(client *Client) {
-	// Send phase
+	// Send phase history first (for timeline)
+	for _, phase := range h.phaseHistory {
+		msg := Message{
+			Type:      MsgPhaseComplete,
+			Timestamp: time.Now(),
+			Data:      phase,
+		}
+		if data, err := json.Marshal(msg); err == nil {
+			client.send <- data
+		}
+	}
+
+	// Send current phase
 	if h.phase != "" {
 		msg := Message{
 			Type:      MsgPhaseChange,
@@ -275,11 +319,21 @@ func (h *Hub) sendCurrentState(client *Client) {
 // SetPhase updates the current phase
 func (h *Hub) SetPhase(phase, description string) {
 	h.mu.Lock()
+
+	// Archive current phase before clearing (if we have agents)
+	if h.phase != "" && len(h.agents) > 0 {
+		h.archiveCurrentPhase()
+	}
+
+	// Update to new phase
 	h.phase = phase
 	h.phaseDesc = description
+	h.phaseStartTime = time.Now()
+
 	// Clear agents for new phase
 	h.agents = make(map[int]*AgentStatusData)
 	h.logs = make(map[int][]string)
+	h.agentOutput = make(map[int]*strings.Builder)
 	h.mu.Unlock()
 
 	h.Broadcast(Message{
@@ -287,6 +341,59 @@ func (h *Hub) SetPhase(phase, description string) {
 		Timestamp: time.Now(),
 		Data:      PhaseData{Phase: phase, Description: description},
 	})
+}
+
+// archiveCurrentPhase saves the current phase to history (must hold lock)
+func (h *Hub) archiveCurrentPhase() {
+	complete := PhaseCompleteData{
+		Phase:       h.phase,
+		Description: h.phaseDesc,
+		StartTime:   h.phaseStartTime,
+		EndTime:     time.Now(),
+		Agents:      make([]AgentCompleteData, 0, len(h.agents)),
+	}
+
+	// Collect all agent data
+	for id, agent := range h.agents {
+		output := ""
+		if builder, ok := h.agentOutput[id]; ok {
+			output = builder.String()
+		}
+
+		complete.Agents = append(complete.Agents, AgentCompleteData{
+			ID:        agent.ID,
+			Name:      agent.Name,
+			Provider:  agent.Provider,
+			Model:     agent.Model,
+			State:     agent.State,
+			Lines:     agent.Lines,
+			Output:    output,
+			StartTime: agent.StartTime,
+			EndTime:   agent.EndTime,
+		})
+	}
+
+	// Sort agents by ID for consistent ordering
+	sort.Slice(complete.Agents, func(i, j int) bool {
+		return complete.Agents[i].ID < complete.Agents[j].ID
+	})
+
+	// Store in history
+	h.phaseHistory = append(h.phaseHistory, complete)
+
+	// Broadcast phase complete
+	msg := Message{
+		Type:      MsgPhaseComplete,
+		Timestamp: time.Now(),
+		Data:      complete,
+	}
+	if data, err := json.Marshal(msg); err == nil {
+		// Non-blocking broadcast
+		select {
+		case h.broadcast <- data:
+		default:
+		}
+	}
 }
 
 // UpdateAgent updates an agent's status
@@ -305,12 +412,20 @@ func (h *Hub) UpdateAgent(agent *AgentStatusData) {
 // AddLog adds a log line for an agent
 func (h *Hub) AddLog(agentID int, line string) {
 	h.mu.Lock()
+	// Ring buffer for recent logs (for new client sync)
 	logs := h.logs[agentID]
 	logs = append(logs, line)
 	if len(logs) > h.maxLogLines {
 		logs = logs[len(logs)-h.maxLogLines:]
 	}
 	h.logs[agentID] = logs
+
+	// Accumulate full output for phase history
+	if _, ok := h.agentOutput[agentID]; !ok {
+		h.agentOutput[agentID] = &strings.Builder{}
+	}
+	h.agentOutput[agentID].WriteString(line)
+	h.agentOutput[agentID].WriteString("\n")
 	h.mu.Unlock()
 
 	h.Broadcast(Message{

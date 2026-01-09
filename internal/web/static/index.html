@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Conclave Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -21,14 +22,14 @@
         .header {
             background: #161b22;
             border-bottom: 1px solid #30363d;
-            padding: 16px 24px;
+            padding: 12px 24px;
             display: flex;
             align-items: center;
             gap: 16px;
         }
 
         .header h1 {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 600;
             color: #f0f6fc;
         }
@@ -45,6 +46,7 @@
 
         .phase-badge.plan { background: #1f6feb; }
         .phase-badge.assess { background: #a371f7; }
+        .phase-badge.debate { background: #f78166; }
         .phase-badge.convene { background: #f78166; }
         .phase-badge.synthesize { background: #238636; }
 
@@ -65,51 +67,264 @@
 
         .status-dot.connected { background: #3fb950; }
 
+        /* 3-column layout */
         .container {
             display: grid;
-            grid-template-columns: 300px 1fr;
-            height: calc(100vh - 57px);
+            grid-template-columns: 260px 1fr 240px;
+            height: calc(100vh - 49px);
         }
 
-        .sidebar {
+        /* Timeline Panel (left) */
+        .timeline-panel {
             background: #161b22;
             border-right: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .timeline-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 13px;
+            color: #f0f6fc;
+        }
+
+        .timeline-content {
+            flex: 1;
             overflow-y: auto;
+            padding: 12px;
+        }
+
+        .phase-card {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .phase-card-header {
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .phase-card-header:hover {
+            background: #30363d;
+        }
+
+        .phase-card-header .phase-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+        }
+
+        .phase-card-header .phase-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .phase-card-header .phase-name {
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .phase-card-header .phase-meta {
+            font-size: 10px;
+            color: #8b949e;
+        }
+
+        .phase-card-header .expand-icon {
+            color: #8b949e;
+            font-size: 10px;
+        }
+
+        .phase-card-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .phase-card-content.expanded {
+            max-height: 5000px;
+        }
+
+        .phase-agent {
+            border-top: 1px solid #30363d;
+            padding: 12px;
+        }
+
+        .phase-agent-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .phase-agent-output {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        /* Active Phase Area (center) */
+        .active-phase-area {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .phase-header {
+            padding: 10px 16px;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .phase-header .phase-description {
+            font-size: 13px;
+            color: #8b949e;
+        }
+
+        /* Split panels */
+        .agent-panels {
+            flex: 1;
+            display: grid;
+            gap: 1px;
+            background: #30363d;
+            overflow: hidden;
+        }
+
+        .agent-panels.single-agent {
+            grid-template-columns: 1fr;
+        }
+
+        .agent-panels.dual-agent {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .agent-panels.triple-agent {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        .agent-panel {
+            background: #0d1117;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .agent-panel-header {
+            padding: 8px 12px;
+            background: #161b22;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #30363d;
+            flex-shrink: 0;
+        }
+
+        .agent-panel-header .agent-name {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .agent-panel-header .agent-provider {
+            font-size: 11px;
+            color: #8b949e;
+        }
+
+        .agent-panel-header .agent-provider.claude { color: #a371f7; }
+        .agent-panel-header .agent-provider.gemini { color: #58a6ff; }
+        .agent-panel-header .agent-provider.codex { color: #3fb950; }
+
+        .agent-panel-header .agent-stats {
+            margin-left: auto;
+            font-size: 11px;
+            color: #8b949e;
+        }
+
+        .agent-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .agent-panel-content .log-line {
+            margin-bottom: 2px;
+            word-break: break-word;
+        }
+
+        .panels-empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #8b949e;
+            font-size: 14px;
+            background: #0d1117;
+        }
+
+        /* Agent Sidebar (right) */
+        .agent-sidebar {
+            background: #161b22;
+            border-left: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 13px;
+            color: #f0f6fc;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .agent-list {
-            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
         }
 
         .agent-card {
             background: #21262d;
             border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-            cursor: pointer;
-            transition: border-color 0.2s;
-        }
-
-        .agent-card:hover {
-            border-color: #58a6ff;
-        }
-
-        .agent-card.selected {
-            border-color: #58a6ff;
-            background: #1c2128;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 8px;
         }
 
         .agent-header {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 6px;
+            margin-bottom: 6px;
         }
 
         .agent-status {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background: #484f58;
         }
@@ -128,23 +343,23 @@
             50% { opacity: 0.5; }
         }
 
-        .agent-name {
+        .agent-card .agent-name {
             font-weight: 600;
-            font-size: 14px;
+            font-size: 12px;
         }
 
-        .agent-provider {
-            font-size: 12px;
+        .agent-card .agent-provider {
+            font-size: 10px;
             color: #8b949e;
             margin-left: auto;
         }
 
-        .agent-provider.claude { color: #a371f7; }
-        .agent-provider.gemini { color: #58a6ff; }
-        .agent-provider.codex { color: #3fb950; }
+        .agent-card .agent-provider.claude { color: #a371f7; }
+        .agent-card .agent-provider.gemini { color: #58a6ff; }
+        .agent-card .agent-provider.codex { color: #3fb950; }
 
         .agent-activity {
-            font-size: 12px;
+            font-size: 11px;
             color: #8b949e;
             white-space: nowrap;
             overflow: hidden;
@@ -153,82 +368,40 @@
 
         .agent-stats {
             display: flex;
-            gap: 12px;
-            margin-top: 8px;
-            font-size: 11px;
+            gap: 8px;
+            margin-top: 6px;
+            font-size: 10px;
             color: #8b949e;
         }
 
-        .main-content {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .log-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid #30363d;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            background: #161b22;
-        }
-
-        .log-filter {
-            display: flex;
-            gap: 8px;
-        }
-
-        .filter-btn {
-            background: #21262d;
-            border: 1px solid #30363d;
-            color: #c9d1d9;
-            padding: 4px 12px;
+        /* Buttons */
+        .kill-btn {
+            background: #da3633;
+            border: none;
+            color: white;
+            padding: 3px 6px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 10px;
         }
 
-        .filter-btn:hover {
-            background: #30363d;
+        .kill-btn:hover { background: #f85149; }
+        .kill-btn:disabled {
+            background: #484f58;
+            cursor: not-allowed;
         }
 
-        .filter-btn.active {
-            background: #1f6feb;
-            border-color: #1f6feb;
+        .kill-all-btn {
+            background: #da3633;
+            border: none;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
         }
 
-        .log-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 12px;
-            line-height: 1.6;
-        }
-
-        .log-line {
-            display: flex;
-            gap: 8px;
-            padding: 2px 0;
-        }
-
-        .log-line:hover {
-            background: #161b22;
-        }
-
-        .log-agent {
-            color: #8b949e;
-            min-width: 80px;
-        }
-
-        .log-agent.claude { color: #a371f7; }
-        .log-agent.gemini { color: #58a6ff; }
-        .log-agent.codex { color: #3fb950; }
-
-        .log-content {
-            flex: 1;
-            word-break: break-all;
-        }
+        .kill-all-btn:hover { background: #f85149; }
 
         .empty-state {
             display: flex;
@@ -236,88 +409,67 @@
             justify-content: center;
             height: 100%;
             color: #8b949e;
+            font-size: 12px;
         }
 
-        .prompt-viewer {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            margin: 16px;
-            max-height: 300px;
-            overflow-y: auto;
+        /* Markdown styling */
+        .markdown-content {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1.6;
         }
 
-        .prompt-header {
-            padding: 8px 12px;
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            color: #f0f6fc;
+            margin: 16px 0 8px 0;
+            padding-bottom: 4px;
             border-bottom: 1px solid #30363d;
-            font-weight: 600;
-            font-size: 12px;
-            position: sticky;
-            top: 0;
+        }
+
+        .markdown-content h1 { font-size: 18px; }
+        .markdown-content h2 { font-size: 16px; }
+        .markdown-content h3 { font-size: 14px; border-bottom: none; }
+
+        .markdown-content p { margin-bottom: 12px; }
+
+        .markdown-content code {
             background: #161b22;
-        }
-
-        .prompt-content {
-            padding: 12px;
-            font-family: monospace;
-            font-size: 11px;
-            white-space: pre-wrap;
-            color: #8b949e;
-        }
-
-        .kill-btn {
-            background: #da3633;
-            border: none;
-            color: white;
-            padding: 4px 8px;
+            padding: 2px 6px;
             border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-
-        .agent-card:hover .kill-btn {
-            opacity: 1;
-        }
-
-        .kill-btn:hover {
-            background: #f85149;
-        }
-
-        .kill-btn:disabled {
-            background: #484f58;
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
-
-        .kill-all-btn {
-            background: #da3633;
-            border: none;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
+            font-family: 'Monaco', 'Menlo', monospace;
             font-size: 12px;
-            font-weight: 500;
         }
 
-        .kill-all-btn:hover {
-            background: #f85149;
+        .markdown-content pre {
+            background: #161b22;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 12px;
         }
 
-        .kill-all-btn:disabled {
-            background: #484f58;
-            cursor: not-allowed;
+        .markdown-content pre code {
+            padding: 0;
+            background: none;
         }
 
-        .agent-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 8px;
+        .markdown-content ul, .markdown-content ol {
+            margin-left: 20px;
+            margin-bottom: 12px;
         }
 
+        .markdown-content li { margin-bottom: 4px; }
+
+        .markdown-content blockquote {
+            border-left: 3px solid #30363d;
+            padding-left: 12px;
+            color: #8b949e;
+            margin-bottom: 12px;
+        }
+
+        .markdown-content strong { color: #f0f6fc; }
+
+        /* Toast notifications */
         .toast {
             position: fixed;
             bottom: 20px;
@@ -331,23 +483,12 @@
             z-index: 1000;
         }
 
-        .toast.success {
-            border-color: #3fb950;
-        }
-
-        .toast.error {
-            border-color: #f85149;
-        }
+        .toast.success { border-color: #3fb950; }
+        .toast.error { border-color: #f85149; }
 
         @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
         }
     </style>
 </head>
@@ -355,7 +496,8 @@
     <div class="header">
         <h1>Conclave</h1>
         <span class="phase-badge" id="phase">Connecting...</span>
-        <button class="kill-all-btn" onclick="killAllAgents()" id="kill-all-btn">Kill All</button>
+        <span class="phase-description" id="phase-desc"></span>
+        <button class="kill-all-btn" onclick="killAllAgents()">Kill All</button>
         <div class="connection-status">
             <span class="status-dot" id="status-dot"></span>
             <span id="connection-text">Disconnected</span>
@@ -363,34 +505,56 @@
     </div>
 
     <div class="container">
-        <div class="sidebar">
-            <div class="agent-list" id="agent-list">
-                <div class="empty-state">Waiting for agents...</div>
+        <!-- Timeline Panel (left) -->
+        <aside class="timeline-panel">
+            <div class="timeline-header">Audit Progress</div>
+            <div class="timeline-content" id="timeline-content">
+                <div class="empty-state">No completed phases yet</div>
             </div>
-        </div>
+        </aside>
 
-        <div class="main-content">
-            <div class="log-header">
-                <span>Logs</span>
-                <div class="log-filter">
-                    <button class="filter-btn active" data-filter="all">All</button>
-                </div>
-                <button class="filter-btn" onclick="clearLogs()" style="margin-left: auto;">Clear</button>
-                <button class="filter-btn" onclick="toggleAutoScroll()">Auto-scroll: <span id="autoscroll-status">On</span></button>
+        <!-- Active Phase Area (center) -->
+        <main class="active-phase-area">
+            <div class="agent-panels" id="agent-panels">
+                <div class="panels-empty-state">Waiting for agents...</div>
             </div>
-            <div class="log-container" id="log-container">
-                <div class="empty-state">No logs yet...</div>
+        </main>
+
+        <!-- Agent Sidebar (right) -->
+        <aside class="agent-sidebar">
+            <div class="sidebar-header">
+                <span>Agents</span>
             </div>
-        </div>
+            <div class="agent-list" id="agent-list">
+                <div class="empty-state">No active agents</div>
+            </div>
+        </aside>
     </div>
 
     <script>
+        // Connection state
         let ws;
-        let agents = {};
-        let logs = [];
-        let selectedAgent = null;
+
+        // Phase tracking
+        let currentPhase = null;
+        let currentPhaseDesc = '';
+
+        // Historical data (preserved across phase changes)
+        let phaseHistory = [];
+
+        // Current phase data (cleared on phase change)
+        let currentAgents = {};
+        let currentAgentLogs = {};
+
+        // UI state
         let autoScroll = true;
-        let filterAgent = 'all';
+        let expandedTimelinePhases = new Set();
+
+        // Configure marked
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -416,13 +580,16 @@
         function handleMessage(msg) {
             switch (msg.type) {
                 case 'phase_change':
-                    updatePhase(msg.data);
+                    handlePhaseChange(msg.data);
+                    break;
+                case 'phase_complete':
+                    handlePhaseComplete(msg.data);
                     break;
                 case 'agent_status':
                     updateAgent(msg.data);
                     break;
                 case 'agent_log':
-                    addLog(msg.data, msg.timestamp);
+                    addLog(msg.data);
                     break;
                 case 'command_ack':
                     handleCommandAck(msg.data);
@@ -430,16 +597,252 @@
             }
         }
 
-        function handleCommandAck(data) {
-            showToast(data.message, data.success ? 'success' : 'error');
+        function handlePhaseChange(data) {
+            currentPhase = data.phase;
+            currentPhaseDesc = data.description;
+
+            // Clear current state for new phase
+            currentAgents = {};
+            currentAgentLogs = {};
+
+            // Update header
+            updatePhaseDisplay();
+
+            // Re-render
+            renderActivePhase();
+            renderAgentSidebar();
         }
 
-        function showToast(message, type) {
-            const toast = document.createElement('div');
-            toast.className = 'toast ' + type;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+        function handlePhaseComplete(data) {
+            // Add to history (avoid duplicates)
+            const exists = phaseHistory.some(p =>
+                p.phase === data.phase &&
+                p.startTime === data.startTime
+            );
+            if (!exists) {
+                phaseHistory.push(data);
+                renderTimeline();
+            }
+        }
+
+        function updatePhaseDisplay() {
+            const badge = document.getElementById('phase');
+            badge.textContent = currentPhase || 'Ready';
+            badge.className = 'phase-badge ' + (currentPhase || '');
+
+            const desc = document.getElementById('phase-desc');
+            desc.textContent = currentPhaseDesc || '';
+        }
+
+        function updateAgent(data) {
+            currentAgents[data.id] = data;
+
+            // Update panel count and render
+            renderActivePhase();
+            renderAgentSidebar();
+        }
+
+        function addLog(data) {
+            const agentId = data.agentId;
+
+            // Accumulate logs
+            if (!currentAgentLogs[agentId]) {
+                currentAgentLogs[agentId] = [];
+            }
+            currentAgentLogs[agentId].push(data.line);
+
+            // Append to panel
+            appendToPanel(agentId, data.line);
+        }
+
+        function renderActivePhase() {
+            const container = document.getElementById('agent-panels');
+            const agentIds = Object.keys(currentAgents).sort((a, b) => a - b);
+
+            if (agentIds.length === 0) {
+                container.innerHTML = '<div class="panels-empty-state">Waiting for agents...</div>';
+                container.className = 'agent-panels';
+                return;
+            }
+
+            // Set column count
+            container.className = 'agent-panels';
+            if (agentIds.length === 1) {
+                container.classList.add('single-agent');
+            } else if (agentIds.length === 2) {
+                container.classList.add('dual-agent');
+            } else {
+                container.classList.add('triple-agent');
+            }
+
+            container.innerHTML = agentIds.map(id => {
+                const agent = currentAgents[id];
+                const providerClass = agent.provider.toLowerCase();
+
+                return `
+                    <div class="agent-panel" data-agent-id="${id}">
+                        <div class="agent-panel-header">
+                            <span class="agent-status ${agent.state}"></span>
+                            <span class="agent-name">${agent.name}</span>
+                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                            <span class="agent-stats">${agent.lines} lines</span>
+                            <button class="kill-btn" onclick="killAgent(${id})" ${agent.state === 'running' ? '' : 'disabled'}>Kill</button>
+                        </div>
+                        <div class="agent-panel-content" id="panel-content-${id}"></div>
+                    </div>
+                `;
+            }).join('');
+
+            // Populate panels with accumulated logs
+            agentIds.forEach(id => {
+                const logs = currentAgentLogs[id] || [];
+                const contentEl = document.getElementById(`panel-content-${id}`);
+                if (contentEl && logs.length > 0) {
+                    const agent = currentAgents[id];
+                    if (agent.state === 'done') {
+                        // Render as markdown when done
+                        contentEl.innerHTML = `<div class="markdown-content">${renderMarkdown(logs.join('\n'))}</div>`;
+                    } else {
+                        // Show raw lines while streaming
+                        contentEl.innerHTML = logs.map(line =>
+                            `<div class="log-line">${escapeHtml(line)}</div>`
+                        ).join('');
+                    }
+
+                    if (autoScroll) {
+                        requestAnimationFrame(() => {
+                            contentEl.scrollTop = contentEl.scrollHeight;
+                        });
+                    }
+                }
+            });
+        }
+
+        function appendToPanel(agentId, line) {
+            const contentEl = document.getElementById(`panel-content-${agentId}`);
+            if (!contentEl) return;
+
+            const agent = currentAgents[agentId];
+            if (!agent || agent.state !== 'running') return;
+
+            const lineEl = document.createElement('div');
+            lineEl.className = 'log-line';
+            lineEl.textContent = line;
+            contentEl.appendChild(lineEl);
+
+            if (autoScroll) {
+                requestAnimationFrame(() => {
+                    contentEl.scrollTop = contentEl.scrollHeight;
+                });
+            }
+        }
+
+        function renderAgentSidebar() {
+            const container = document.getElementById('agent-list');
+            const agentIds = Object.keys(currentAgents).sort((a, b) => a - b);
+
+            if (agentIds.length === 0) {
+                container.innerHTML = '<div class="empty-state">No active agents</div>';
+                return;
+            }
+
+            container.innerHTML = agentIds.map(id => {
+                const agent = currentAgents[id];
+                const elapsed = formatDuration(agent.startTime, agent.endTime);
+                const canKill = agent.state === 'running' || agent.state === 'waiting';
+                const providerClass = agent.provider.toLowerCase();
+
+                return `
+                    <div class="agent-card">
+                        <div class="agent-header">
+                            <span class="agent-status ${agent.state}"></span>
+                            <span class="agent-name">${agent.name}</span>
+                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                        </div>
+                        <div class="agent-activity">${agent.activity || 'Waiting...'}</div>
+                        <div class="agent-stats">
+                            <span>${agent.lines} lines</span>
+                            <span>${elapsed}</span>
+                            <span>${agent.state}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderTimeline() {
+            const container = document.getElementById('timeline-content');
+
+            if (phaseHistory.length === 0) {
+                container.innerHTML = '<div class="empty-state">No completed phases yet</div>';
+                return;
+            }
+
+            container.innerHTML = phaseHistory.map((phase, index) => {
+                const isExpanded = expandedTimelinePhases.has(index);
+                const duration = formatDuration(phase.startTime, phase.endTime);
+                const agentCount = phase.agents ? phase.agents.length : 0;
+
+                return `
+                    <div class="phase-card" data-phase-index="${index}">
+                        <div class="phase-card-header" onclick="togglePhaseExpand(${index})">
+                            <span class="phase-badge ${phase.phase}">${phase.phase}</span>
+                            <div class="phase-info">
+                                <div class="phase-name">${phase.description || phase.phase}</div>
+                                <div class="phase-meta">${agentCount} agent${agentCount !== 1 ? 's' : ''} | ${duration}</div>
+                            </div>
+                            <span class="expand-icon">${isExpanded ? '▼' : '▶'}</span>
+                        </div>
+                        <div class="phase-card-content ${isExpanded ? 'expanded' : ''}">
+                            ${renderPhaseAgents(phase)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderPhaseAgents(phase) {
+            if (!phase.agents || phase.agents.length === 0) {
+                return '<div class="phase-agent"><div class="empty-state">No agent data</div></div>';
+            }
+
+            return phase.agents.map(agent => {
+                const providerClass = agent.provider.toLowerCase();
+                const duration = formatDuration(agent.startTime, agent.endTime);
+
+                return `
+                    <div class="phase-agent">
+                        <div class="phase-agent-header">
+                            <span class="agent-status ${agent.state}"></span>
+                            <span class="agent-name">${agent.name}</span>
+                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                            <span style="margin-left: auto; color: #8b949e;">${agent.lines} lines | ${duration}</span>
+                        </div>
+                        <div class="phase-agent-output markdown-content">
+                            ${renderMarkdown(agent.output || 'No output')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function togglePhaseExpand(index) {
+            if (expandedTimelinePhases.has(index)) {
+                expandedTimelinePhases.delete(index);
+            } else {
+                expandedTimelinePhases.add(index);
+            }
+            renderTimeline();
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                return marked.parse(text);
+            } catch (e) {
+                console.error('Markdown render error:', e);
+                return escapeHtml(text);
+            }
         }
 
         function sendCommand(action, agentId) {
@@ -461,141 +864,20 @@
             sendCommand('kill_all', 0);
         }
 
-        function updatePhase(data) {
-            const badge = document.getElementById('phase');
-            badge.textContent = data.phase;
-            badge.className = 'phase-badge ' + data.phase;
+        function handleCommandAck(data) {
+            showToast(data.message, data.success ? 'success' : 'error');
         }
 
-        function updateAgent(data) {
-            agents[data.id] = data;
-            renderAgentList();
-        }
-
-        function renderAgentList() {
-            const container = document.getElementById('agent-list');
-            const agentIds = Object.keys(agents).sort((a, b) => a - b);
-
-            if (agentIds.length === 0) {
-                container.innerHTML = '<div class="empty-state">Waiting for agents...</div>';
-                return;
-            }
-
-            container.innerHTML = agentIds.map(id => {
-                const agent = agents[id];
-                const isSelected = selectedAgent === id;
-                const elapsed = formatDuration(agent.startTime, agent.endTime);
-                const canKill = agent.state === 'running' || agent.state === 'waiting';
-
-                return `
-                    <div class="agent-card ${isSelected ? 'selected' : ''}" onclick="selectAgent(${id})">
-                        <div class="agent-header">
-                            <span class="agent-status ${agent.state}"></span>
-                            <span class="agent-name">${agent.name}</span>
-                            <span class="agent-provider ${agent.provider.toLowerCase()}">${agent.provider}${agent.model ? ' (' + agent.model + ')' : ''}</span>
-                        </div>
-                        <div class="agent-activity">${agent.activity || 'Waiting...'}</div>
-                        <div class="agent-controls">
-                            <div class="agent-stats">
-                                <span>${agent.lines} lines</span>
-                                <span>${elapsed}</span>
-                                <span>${agent.state}</span>
-                            </div>
-                            <button class="kill-btn" onclick="event.stopPropagation(); killAgent(${id})" ${canKill ? '' : 'disabled'}>Kill</button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            // Update filter buttons
-            updateFilterButtons();
-        }
-
-        function updateFilterButtons() {
-            const filterDiv = document.querySelector('.log-filter');
-            const agentIds = Object.keys(agents).sort((a, b) => a - b);
-
-            let html = '<button class="filter-btn ' + (filterAgent === 'all' ? 'active' : '') + '" data-filter="all" onclick="setFilter(\'all\')">All</button>';
-
-            agentIds.forEach(id => {
-                const agent = agents[id];
-                const isActive = filterAgent === id;
-                html += `<button class="filter-btn ${isActive ? 'active' : ''}" data-filter="${id}" onclick="setFilter('${id}')">${agent.name}</button>`;
-            });
-
-            filterDiv.innerHTML = html;
-        }
-
-        function setFilter(filter) {
-            filterAgent = filter;
-            updateFilterButtons();
-            renderLogs();
-        }
-
-        function selectAgent(id) {
-            selectedAgent = selectedAgent === id ? null : id;
-            renderAgentList();
-        }
-
-        function addLog(data, timestamp) {
-            logs.push({
-                agentId: data.agentId,
-                line: data.line,
-                timestamp: timestamp
-            });
-
-            // Keep last 2000 logs
-            if (logs.length > 2000) {
-                logs = logs.slice(-2000);
-            }
-
-            renderLogs();
-        }
-
-        function renderLogs() {
-            const container = document.getElementById('log-container');
-            let filteredLogs = logs;
-
-            if (filterAgent !== 'all') {
-                filteredLogs = logs.filter(l => l.agentId == filterAgent);
-            }
-
-            if (filteredLogs.length === 0) {
-                container.innerHTML = '<div class="empty-state">No logs yet...</div>';
-                return;
-            }
-
-            container.innerHTML = filteredLogs.map(log => {
-                const agent = agents[log.agentId];
-                const providerClass = agent ? agent.provider.toLowerCase() : '';
-                const agentName = agent ? agent.name : `Agent ${log.agentId}`;
-
-                return `
-                    <div class="log-line">
-                        <span class="log-agent ${providerClass}">[${agentName}]</span>
-                        <span class="log-content">${escapeHtml(log.line)}</span>
-                    </div>
-                `;
-            }).join('');
-
-            if (autoScroll) {
-                requestAnimationFrame(() => {
-                    container.scrollTop = container.scrollHeight;
-                });
-            }
-        }
-
-        function clearLogs() {
-            logs = [];
-            renderLogs();
-        }
-
-        function toggleAutoScroll() {
-            autoScroll = !autoScroll;
-            document.getElementById('autoscroll-status').textContent = autoScroll ? 'On' : 'Off';
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
         }
 
         function formatDuration(startTime, endTime) {
+            if (!startTime) return '0s';
             const start = new Date(startTime);
             const end = endTime ? new Date(endTime) : new Date();
             const seconds = Math.floor((end - start) / 1000);
@@ -614,7 +896,7 @@
 
         // Update durations every second
         setInterval(() => {
-            renderAgentList();
+            renderAgentSidebar();
         }, 1000);
 
         // Connect on load
