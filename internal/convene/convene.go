@@ -4,17 +4,25 @@ import (
 	"fmt"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/context"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
 // DebateGenerator generates debate prompts
 type DebateGenerator struct {
-	agent agent.Agent
+	agent   agent.Agent
+	context *context.RepoContext
 }
 
 // NewDebateGenerator creates a new debate generator
 func NewDebateGenerator(ag agent.Agent) *DebateGenerator {
 	return &DebateGenerator{agent: ag}
+}
+
+// WithContext sets the repository context for prompts
+func (g *DebateGenerator) WithContext(ctx *context.RepoContext) *DebateGenerator {
+	g.context = ctx
+	return g
 }
 
 // GeneratePrompts creates debate prompts that include all perspectives
@@ -38,6 +46,17 @@ func (g *DebateGenerator) GeneratePrompts(plan *state.Plan, subsystem string, pe
 		perspectivesText += fmt.Sprintf("\n### Agent %d's Assessment\n%s\n", i+1, p)
 	}
 
+	// Build repository context section
+	repoContextSection := ""
+	if g.context != nil {
+		if general := g.context.ForPrompt(); general != "" {
+			repoContextSection += "\n" + general + "\n"
+		}
+		if specific := g.context.ForSubsystemPrompt(subsystem); specific != "" {
+			repoContextSection += "\n" + specific + "\n"
+		}
+	}
+
 	baseContext := fmt.Sprintf(`## Codebase Context
 %s
 
@@ -45,10 +64,10 @@ func (g *DebateGenerator) GeneratePrompts(plan *state.Plan, subsystem string, pe
 **Name:** %s
 **Paths:** %s
 **Description:** %s
-
+%s
 ## Security Assessments from Initial Review
 %s
-`, plan.Overview, sub.Name, sub.Paths, sub.Description, perspectivesText)
+`, plan.Overview, sub.Name, sub.Paths, sub.Description, repoContextSection, perspectivesText)
 
 	// Generate three debate prompts with different roles
 	prompts := []string{
