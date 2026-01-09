@@ -7,11 +7,13 @@ import (
 )
 
 // ClaudeAgent implements Agent using the Claude CLI
-type ClaudeAgent struct{}
+type ClaudeAgent struct {
+	model string
+}
 
-// NewClaudeAgent creates a new Claude agent
-func NewClaudeAgent() *ClaudeAgent {
-	return &ClaudeAgent{}
+// NewClaudeAgent creates a new Claude agent with optional model
+func NewClaudeAgent(model string) *ClaudeAgent {
+	return &ClaudeAgent{model: model}
 }
 
 // Name returns the agent type name
@@ -28,7 +30,12 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		defer close(output)
 		defer close(errCh)
 
-		cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+		args := []string{"-p", prompt}
+		if a.model != "" {
+			args = append([]string{"--model", a.model}, args...)
+		}
+
+		cmd := exec.CommandContext(ctx, "claude", args...)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -56,7 +63,7 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		// Also capture stderr
 		stderrScanner := bufio.NewScanner(stderr)
 		for stderrScanner.Scan() {
-			output <- scanner.Text()
+			output <- stderrScanner.Text()
 		}
 
 		if err := cmd.Wait(); err != nil {

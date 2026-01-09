@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	useClaude bool
-	useGemini bool
-	useCodex  bool
+	claudeModel string
+	geminiModel string
+	codexModel  string
 )
 
 var rootCmd = &cobra.Command{
@@ -30,9 +30,15 @@ The workflow consists of:
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVar(&useClaude, "claude", false, "Use Claude CLI")
-	rootCmd.PersistentFlags().BoolVar(&useGemini, "gemini", false, "Use Gemini CLI")
-	rootCmd.PersistentFlags().BoolVar(&useCodex, "codex", false, "Use Codex CLI (default if no flags)")
+	// String flags with optional values: --claude or --claude=opus
+	rootCmd.PersistentFlags().StringVar(&claudeModel, "claude", "", "Use Claude CLI (optionally specify model: --claude=opus)")
+	rootCmd.PersistentFlags().StringVar(&geminiModel, "gemini", "", "Use Gemini CLI (optionally specify model: --gemini=gemini-2.5-pro)")
+	rootCmd.PersistentFlags().StringVar(&codexModel, "codex", "", "Use Codex CLI (optionally specify model: --codex=o3)")
+
+	// Allow flags without values (--claude means use default model)
+	rootCmd.PersistentFlags().Lookup("claude").NoOptDefVal = "default"
+	rootCmd.PersistentFlags().Lookup("gemini").NoOptDefVal = "default"
+	rootCmd.PersistentFlags().Lookup("codex").NoOptDefVal = "default"
 }
 
 func Execute() error {
@@ -44,13 +50,13 @@ func Execute() error {
 func enabledProviders() []string {
 	var providers []string
 
-	if useCodex {
+	if codexModel != "" {
 		providers = append(providers, "codex")
 	}
-	if useClaude {
+	if claudeModel != "" {
 		providers = append(providers, "claude")
 	}
-	if useGemini {
+	if geminiModel != "" {
 		providers = append(providers, "gemini")
 	}
 
@@ -62,62 +68,79 @@ func enabledProviders() []string {
 	return providers
 }
 
+// getModel returns the model for a provider, or empty string for default
+func getModel(provider string) string {
+	var model string
+	switch provider {
+	case "codex":
+		model = codexModel
+	case "claude":
+		model = claudeModel
+	case "gemini":
+		model = geminiModel
+	}
+	if model == "default" {
+		return ""
+	}
+	return model
+}
+
 // PrimaryBackend returns the name of the primary agent backend (first enabled provider)
 func PrimaryBackend() string {
 	providers := enabledProviders()
 	return strings.Title(providers[0])
 }
 
-// AgentBackend returns a description of enabled backends
+// AgentBackend returns a description of enabled backends with models
 func AgentBackend() string {
 	providers := enabledProviders()
-	if len(providers) == 1 {
-		return strings.Title(providers[0])
-	}
-	// Capitalize each
 	names := make([]string, len(providers))
 	for i, p := range providers {
-		names[i] = strings.Title(p)
+		model := getModel(p)
+		if model != "" {
+			names[i] = fmt.Sprintf("%s (%s)", strings.Title(p), model)
+		} else {
+			names[i] = strings.Title(p)
+		}
 	}
 	return strings.Join(names, ", ")
 }
 
 // CreateAgent returns a new agent based on the primary backend
 func CreateAgent() agent.Agent {
-	return createAgentByName(strings.ToLower(PrimaryBackend()))
+	name := strings.ToLower(enabledProviders()[0])
+	return createAgentByName(name, getModel(name))
 }
 
 // CreateResilientAgent returns an agent with automatic failover to other providers
 func CreateResilientAgent() agent.Agent {
 	providers := enabledProviders()
 	if len(providers) == 1 {
-		return createAgentByName(providers[0])
+		return createAgentByName(providers[0], getModel(providers[0]))
 	}
 
 	// Primary is the first specified provider
-	primary := createAgentByName(strings.ToLower(PrimaryBackend()))
+	primaryName := providers[0]
+	primary := createAgentByName(primaryName, getModel(primaryName))
 
 	// Build fallback list from other enabled providers
 	var fallbacks []agent.Agent
-	primaryName := strings.ToLower(PrimaryBackend())
-	for _, p := range providers {
-		if p != primaryName {
-			fallbacks = append(fallbacks, createAgentByName(p))
-		}
+	for _, p := range providers[1:] {
+		fallbacks = append(fallbacks, createAgentByName(p, getModel(p)))
 	}
 
 	return agent.NewResilientAgent(primary, fallbacks)
 }
 
-// createAgentByName creates an agent for the given provider name
-func createAgentByName(name string) agent.Agent {
+// createAgentByName creates an agent for the given provider name and model
+func createAgentByName(name, model string) agent.Agent {
 	switch name {
 	case "claude":
-		return agent.NewClaudeAgent()
+		return agent.NewClaudeAgent(model)
 	case "gemini":
-		return agent.NewGeminiAgent()
+		return agent.NewGeminiAgent(model)
 	default:
-		return agent.NewCodexAgent()
+		return agent.NewCodexAgent(model)
 	}
 }
 
@@ -131,8 +154,9 @@ func DistributeAgents(n int) []agent.Agent {
 
 	if len(providers) == 1 {
 		// Single provider - all agents use it (no failover possible)
+		p := providers[0]
 		for i := 0; i < n; i++ {
-			agents[i] = createAgentByName(providers[0])
+			agents[i] = createAgentByName(p, getModel(p))
 		}
 		return agents
 	}
@@ -165,13 +189,13 @@ func DistributeAgents(n int) []agent.Agent {
 
 	// Create resilient agents with failover capability
 	for i := 0; i < n; i++ {
-		primary := createAgentByName(assigned[i])
+		primary := createAgentByName(assigned[i], getModel(assigned[i]))
 
 		// Build fallback list from other providers
 		var fallbacks []agent.Agent
 		for _, p := range providers {
 			if p != assigned[i] {
-				fallbacks = append(fallbacks, createAgentByName(p))
+				fallbacks = append(fallbacks, createAgentByName(p, getModel(p)))
 			}
 		}
 

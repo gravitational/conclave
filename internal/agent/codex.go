@@ -8,11 +8,13 @@ import (
 )
 
 // CodexAgent implements Agent using the Codex CLI
-type CodexAgent struct{}
+type CodexAgent struct {
+	model string
+}
 
-// NewCodexAgent creates a new Codex agent
-func NewCodexAgent() *CodexAgent {
-	return &CodexAgent{}
+// NewCodexAgent creates a new Codex agent with optional model
+func NewCodexAgent(model string) *CodexAgent {
+	return &CodexAgent{model: model}
 }
 
 // Name returns the agent type name
@@ -30,7 +32,13 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		defer close(errCh)
 
 		// codex exec --full-auto with prompt via stdin (using "-" to read from stdin)
-		cmd := exec.CommandContext(ctx, "codex", "exec", "--full-auto", "-")
+		args := []string{"exec", "--full-auto"}
+		if a.model != "" {
+			args = append(args, "--model", a.model)
+		}
+		args = append(args, "-")
+
+		cmd := exec.CommandContext(ctx, "codex", args...)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()

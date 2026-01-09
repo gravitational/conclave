@@ -8,11 +8,13 @@ import (
 )
 
 // GeminiAgent implements Agent using the Gemini CLI
-type GeminiAgent struct{}
+type GeminiAgent struct {
+	model string
+}
 
-// NewGeminiAgent creates a new Gemini agent
-func NewGeminiAgent() *GeminiAgent {
-	return &GeminiAgent{}
+// NewGeminiAgent creates a new Gemini agent with optional model
+func NewGeminiAgent(model string) *GeminiAgent {
+	return &GeminiAgent{model: model}
 }
 
 // Name returns the agent type name
@@ -30,7 +32,12 @@ func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		defer close(errCh)
 
 		// gemini -y (yolo mode) with prompt via stdin
-		cmd := exec.CommandContext(ctx, "gemini", "-y")
+		args := []string{"-y"}
+		if a.model != "" {
+			args = append(args, "--model", a.model)
+		}
+
+		cmd := exec.CommandContext(ctx, "gemini", args...)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()
