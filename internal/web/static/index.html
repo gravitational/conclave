@@ -579,7 +579,9 @@
             }).join('');
 
             if (autoScroll) {
-                container.scrollTop = container.scrollHeight;
+                requestAnimationFrame(() => {
+                    container.scrollTop = container.scrollHeight;
+                });
             }
         }
 
