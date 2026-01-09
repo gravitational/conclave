@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var feedbackPlanID string
+
 var feedbackCmd = &cobra.Command{
 	Use:   "feedback '<your feedback>'",
 	Short: "Provide natural language feedback on findings",
@@ -33,6 +35,7 @@ Examples:
 }
 
 func init() {
+	feedbackCmd.Flags().StringVar(&feedbackPlanID, "plan", "", "Plan ID to provide feedback on (default: most recent)")
 	rootCmd.AddCommand(feedbackCmd)
 }
 
@@ -57,13 +60,36 @@ func runFeedback(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
-	// Get most recent plan and results
-	plan, _ := st.LoadMostRecentPlan()
+	// Load plan (specified or most recent)
+	var plan *state.Plan
+	if feedbackPlanID != "" {
+		plan, err = st.LoadPlanByID(feedbackPlanID)
+		if err != nil {
+			return fmt.Errorf("plan not found: %s", feedbackPlanID)
+		}
+	} else {
+		plan, _ = st.LoadMostRecentPlan()
+	}
 
 	// Build context about what was found
 	findingsContext := buildFindingsContext(st, plan)
 
 	display.PrintHeader("PROCESSING FEEDBACK")
+	if plan != nil {
+		display.PrintStatus("Plan: %s (%s)", plan.Name, plan.ID[:8])
+		// Show which subsystems have results
+		var assessed []string
+		for _, sub := range plan.Subsystems {
+			if result, _ := st.LoadResult(plan.ID, sub.Slug); result != "" {
+				assessed = append(assessed, sub.Name)
+			}
+		}
+		if len(assessed) > 0 {
+			display.PrintStatus("Results: %s", strings.Join(assessed, ", "))
+		}
+	} else {
+		display.PrintStatus("No audit results found - feedback will be general context")
+	}
 	display.PrintStatus("Feedback: %s", feedback)
 	fmt.Println()
 
