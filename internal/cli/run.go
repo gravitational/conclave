@@ -133,13 +133,35 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
 
-	// STEP 2: Assess random subsystem
+	// STEP 2: Assess subsystem (prioritize unreviewed)
 	if hub != nil {
 		hub.SetPhase("assess", "Security assessment in progress")
 	}
 	display.PrintHeader("STEP 2: ASSESS")
+
+	// Find subsystems that haven't been reviewed yet
+	var unreviewed []*state.Subsystem
+	var reviewed []string
+	for i := range p.Subsystems {
+		sub := &p.Subsystems[i]
+		if result, _ := st.LoadResult(p.ID, sub.Slug); result == "" {
+			unreviewed = append(unreviewed, sub)
+		} else {
+			reviewed = append(reviewed, sub.Name)
+		}
+	}
+
 	rand.Seed(time.Now().UnixNano())
-	subsystem := &p.Subsystems[rand.Intn(len(p.Subsystems))]
+	var subsystem *state.Subsystem
+	if len(unreviewed) > 0 {
+		// Pick from unreviewed subsystems
+		subsystem = unreviewed[rand.Intn(len(unreviewed))]
+		display.PrintStatus("Progress: %d/%d subsystems reviewed", len(reviewed), len(p.Subsystems))
+	} else {
+		// All reviewed - pick any for re-review
+		subsystem = &p.Subsystems[rand.Intn(len(p.Subsystems))]
+		display.PrintStatus("All %d subsystems reviewed - re-reviewing", len(p.Subsystems))
+	}
 	display.PrintStatus("Target subsystem: %s", subsystem.Name)
 	fmt.Println()
 
@@ -174,9 +196,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintSuccess("Assessment complete")
 
 	// STEP 3: Multi-round Debate
-	if hub != nil {
-		hub.SetPhase("debate", "Multi-round peer review")
-	}
 	display.PrintHeader("STEP 3: DEBATE")
 
 	debate, err := convene.NewDebate(p, subsystem.Slug)
@@ -186,6 +205,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 	debate.WithContext(repoCtx)
 
 	// Round 1: Review initial findings
+	if hub != nil {
+		hub.SetPhase("debate", "Debate Round 1: Reviewing findings")
+	}
 	display.PrintStatus("Round 1: Reviewing initial findings")
 	fmt.Println()
 	round1Prompts := debate.Round1Prompts(perspectives)
@@ -199,6 +221,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// Round 2: Respond to each other
+	if hub != nil {
+		hub.SetPhase("debate", "Debate Round 2: Cross-review")
+	}
 	display.PrintStatus("Round 2: Debating findings")
 	fmt.Println()
 	round2Prompts := debate.Round2Prompts(perspectives, round1)
@@ -217,6 +242,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Final: Synthesize into report
+	if hub != nil {
+		hub.SetPhase("synthesize", "Final synthesis")
+	}
 	display.PrintStatus("Final: Synthesizing report")
 	finalPrompt := debate.FinalPrompt(perspectives, round1, round2)
 	var result string

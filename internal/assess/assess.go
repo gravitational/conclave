@@ -49,7 +49,7 @@ IMPORTANT: Each generated prompt MUST include instructions to:
 	// Generate prompts dynamically using the LLM
 	metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate 3 different prompts that will be given to 3 separate security review agents.
 
-Each prompt should instruct the agent to independently review the following subsystem for security vulnerabilities:
+Each prompt should instruct the agent to independently review a subsystem for security vulnerabilities.
 
 ## Codebase Context
 %s
@@ -62,6 +62,12 @@ Each prompt should instruct the agent to independently review the following subs
 %s
 Generate 3 different prompts for independent security reviews. Each should encourage thorough exploration and finding serious, exploitable vulnerabilities with specific code locations and attack scenarios.
 
+CRITICAL: In each generated prompt, you MUST include the ACTUAL subsystem details:
+- Use the actual name "%s" (not a placeholder)
+- Use the actual paths "%s" (not a placeholder)
+- Use the actual description (not a placeholder)
+Each prompt must contain the real subsystem information so the reviewing agent knows what to review.
+
 Output format - use exactly this format with the markers:
 
 ---PROMPT1---
@@ -71,7 +77,7 @@ Output format - use exactly this format with the markers:
 ---PROMPT3---
 <third prompt here>
 ---END---
-`, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions)
+`, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions, subsystem.Name, subsystem.Paths)
 
 	output, err := agent.RunAndCollect(g.agent, metaPrompt)
 	if err != nil {

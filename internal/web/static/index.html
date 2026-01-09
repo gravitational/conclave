@@ -635,15 +635,31 @@
         }
 
         function updateAgent(data) {
-            currentAgents[data.id] = data;
+            const id = String(data.id);
+            const prevAgent = currentAgents[id];
+            currentAgents[id] = data;
 
-            // Update panel count and render
-            renderActivePhase();
+            // Check if we need to create/update panels
+            const panelExists = document.getElementById(`panel-content-${id}`);
+
+            if (!panelExists) {
+                // New agent - need to rebuild panels
+                renderActivePhase();
+            } else {
+                // Update existing panel header
+                updatePanelHeader(id, data);
+
+                // If agent just finished, render markdown
+                if (prevAgent && prevAgent.state === 'running' && data.state === 'done') {
+                    renderPanelContent(id);
+                }
+            }
+
             renderAgentSidebar();
         }
 
         function addLog(data) {
-            const agentId = data.agentId;
+            const agentId = String(data.agentId);
 
             // Accumulate logs
             if (!currentAgentLogs[agentId]) {
@@ -653,6 +669,35 @@
 
             // Append to panel
             appendToPanel(agentId, data.line);
+        }
+
+        function updatePanelHeader(id, agent) {
+            const panel = document.querySelector(`.agent-panel[data-agent-id="${id}"]`);
+            if (!panel) return;
+
+            const header = panel.querySelector('.agent-panel-header');
+            if (!header) return;
+
+            const providerClass = agent.provider.toLowerCase();
+            header.innerHTML = `
+                <span class="agent-status ${agent.state}"></span>
+                <span class="agent-name">${agent.name}</span>
+                <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                <span class="agent-stats">${agent.lines} lines</span>
+                <button class="kill-btn" onclick="killAgent(${id})" ${agent.state === 'running' ? '' : 'disabled'}>Kill</button>
+            `;
+        }
+
+        function renderPanelContent(id) {
+            const contentEl = document.getElementById(`panel-content-${id}`);
+            if (!contentEl) return;
+
+            const logs = currentAgentLogs[id] || [];
+            const agent = currentAgents[id];
+
+            if (logs.length > 0 && agent && agent.state === 'done') {
+                contentEl.innerHTML = `<div class="markdown-content">${renderMarkdown(logs.join('\n'))}</div>`;
+            }
         }
 
         function renderActivePhase() {
@@ -700,10 +745,8 @@
                 if (contentEl && logs.length > 0) {
                     const agent = currentAgents[id];
                     if (agent.state === 'done') {
-                        // Render as markdown when done
                         contentEl.innerHTML = `<div class="markdown-content">${renderMarkdown(logs.join('\n'))}</div>`;
                     } else {
-                        // Show raw lines while streaming
                         contentEl.innerHTML = logs.map(line =>
                             `<div class="log-line">${escapeHtml(line)}</div>`
                         ).join('');
