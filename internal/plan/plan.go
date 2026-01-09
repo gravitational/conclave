@@ -1,7 +1,7 @@
 package plan
 
 import (
-	"github.com/anthropics/conclave/internal/state"
+	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
 // Plan is re-exported from state for convenience

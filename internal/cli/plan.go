@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anthropics/conclave/internal/agent"
-	"github.com/anthropics/conclave/internal/plan"
-	"github.com/anthropics/conclave/internal/state"
+	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/plan"
+	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
 

@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/conclave/internal/agent"
-	"github.com/anthropics/conclave/internal/assess"
-	"github.com/anthropics/conclave/internal/convene"
-	"github.com/anthropics/conclave/internal/plan"
-	"github.com/anthropics/conclave/internal/state"
+	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/assess"
+	"github.com/rob-picard-teleport/conclave/internal/convene"
+	"github.com/rob-picard-teleport/conclave/internal/plan"
+	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
 

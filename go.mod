@@ -1,4 +1,4 @@
-module github.com/anthropics/conclave
+module github.com/rob-picard-teleport/conclave
 
 go 1.24.3
 

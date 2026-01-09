@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/anthropics/conclave/internal/agent"
-	"github.com/anthropics/conclave/internal/convene"
-	"github.com/anthropics/conclave/internal/state"
+	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/convene"
+	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
 

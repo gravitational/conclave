@@ -3,8 +3,8 @@ package convene
 import (
 	"fmt"
 
-	"github.com/anthropics/conclave/internal/agent"
-	"github.com/anthropics/conclave/internal/state"
+	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
 // DebateGenerator generates debate prompts
