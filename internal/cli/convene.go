@@ -17,9 +17,11 @@ var (
 
 var conveneCmd = &cobra.Command{
 	Use:   "convene",
-	Short: "Have agents debate and refine their perspectives",
-	Long: `Load the perspectives from an assessment and spin up three agents to
-debate and improve upon the findings.`,
+	Short: "Run multi-round debate on assessment findings",
+	Long: `Load the perspectives from an assessment and run a multi-round debate:
+- Round 1: Agents review initial findings
+- Round 2: Agents respond to each other
+- Final: Synthesize into report`,
 	RunE: runConvene,
 }
 
@@ -69,30 +71,47 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	display.PrintStatus("Providers: %s", AgentBackend())
 	fmt.Println()
 
-	// Generate debate prompts
-	debateGen := convene.NewDebateGenerator(CreateAgent())
-	prompts, err := debateGen.GeneratePrompts(p, conveneSubsystem, perspectives)
+	// Create debate
+	debate, err := convene.NewDebate(p, conveneSubsystem)
 	if err != nil {
-		return fmt.Errorf("failed to generate debate prompts: %w", err)
+		return fmt.Errorf("failed to create debate: %w", err)
 	}
 
-	// Run 3 agents with status display
-	agents := DistributeAgents(3)
-	names := []string{"Debater 1", "Debater 2", "Debater 3"}
-	debates := agent.StreamMultipleWithStatus(agents, prompts, names)
+	// Round 1: Review initial findings
+	display.PrintStatus("Round 1: Reviewing initial findings")
+	fmt.Println()
+	round1Prompts := debate.Round1Prompts(perspectives)
+	agents1 := DistributeAgents(3)
+	round1 := agent.StreamMultipleWithStatus(agents1, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	fmt.Println()
+
+	// Round 2: Respond to each other
+	display.PrintStatus("Round 2: Debating findings")
+	fmt.Println()
+	round2Prompts := debate.Round2Prompts(perspectives, round1)
+	agents2 := DistributeAgents(3)
+	round2 := agent.StreamMultipleWithStatus(agents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	fmt.Println()
+
+	// Save debate outputs
+	for i, content := range round1 {
+		st.SaveDebate(p.ID, conveneSubsystem, i+1, content)
+	}
+
+	// Final synthesis
+	display.PrintStatus("Final: Synthesizing report")
+	finalPrompt := debate.FinalPrompt(perspectives, round1, round2)
+	result := agent.StreamSilent(CreateAgent(), finalPrompt, "Producing final report")
+
+	// Save result
+	resultPath, err := st.SaveResult(p.ID, conveneSubsystem, result)
+	if err != nil {
+		return fmt.Errorf("failed to save result: %w", err)
+	}
 
 	fmt.Println()
 	display.PrintSuccess("Debate complete")
-
-	// Save debate outputs
-	for i, content := range debates {
-		path, err := st.SaveDebate(p.ID, conveneSubsystem, i+1, content)
-		if err != nil {
-			display.PrintError("Failed to save debate %d: %v", i+1, err)
-			continue
-		}
-		display.PrintSuccess("Saved: %s", path)
-	}
+	display.PrintSuccess("Result: %s", resultPath)
 
 	return nil
 }

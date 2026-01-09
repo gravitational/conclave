@@ -2,32 +2,21 @@ package convene
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/context"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
-// DebateGenerator generates debate prompts
-type DebateGenerator struct {
-	agent   agent.Agent
+// Debate manages multi-round debates between agents
+type Debate struct {
 	context *context.RepoContext
+	plan    *state.Plan
+	sub     *state.Subsystem
 }
 
-// NewDebateGenerator creates a new debate generator
-func NewDebateGenerator(ag agent.Agent) *DebateGenerator {
-	return &DebateGenerator{agent: ag}
-}
-
-// WithContext sets the repository context for prompts
-func (g *DebateGenerator) WithContext(ctx *context.RepoContext) *DebateGenerator {
-	g.context = ctx
-	return g
-}
-
-// GeneratePrompts creates debate prompts that include all perspectives
-func (g *DebateGenerator) GeneratePrompts(plan *state.Plan, subsystem string, perspectives []string) ([]string, error) {
-	// Find subsystem details
+// NewDebate creates a new debate for a subsystem
+func NewDebate(plan *state.Plan, subsystem string) (*Debate, error) {
 	var sub *state.Subsystem
 	for i := range plan.Subsystems {
 		if plan.Subsystems[i].Slug == subsystem {
@@ -35,91 +24,152 @@ func (g *DebateGenerator) GeneratePrompts(plan *state.Plan, subsystem string, pe
 			break
 		}
 	}
-
 	if sub == nil {
 		return nil, fmt.Errorf("subsystem not found: %s", subsystem)
 	}
 
-	// Build context with all perspectives
-	perspectivesText := ""
+	return &Debate{plan: plan, sub: sub}, nil
+}
+
+// WithContext sets the repository context
+func (d *Debate) WithContext(ctx *context.RepoContext) *Debate {
+	d.context = ctx
+	return d
+}
+
+// Round1Prompts creates prompts for the first debate round (review initial findings)
+func (d *Debate) Round1Prompts(perspectives []string) []string {
+	base := d.buildBaseContext(perspectives, nil)
+
+	prompt := fmt.Sprintf(`You are a security researcher reviewing initial findings from other researchers.
+
+%s
+
+Review these findings critically:
+- Which findings are valid and exploitable?
+- Which seem like false positives or overblown?
+- What did other reviewers miss?
+- How would you prioritize these issues?
+
+Be specific. Reference the actual code and explain your reasoning.
+`, base)
+
+	// All agents get same prompt, vary slightly
+	return []string{
+		prompt,
+		prompt + "\nBe thorough in your analysis.",
+		prompt + "\nConsider how these vulnerabilities could be chained together.",
+	}
+}
+
+// Round2Prompts creates prompts for the second round (respond to each other)
+func (d *Debate) Round2Prompts(perspectives []string, round1 []string) []string {
+	base := d.buildBaseContext(perspectives, round1)
+
+	prompt := fmt.Sprintf(`You are a security researcher in a peer review discussion.
+
+%s
+
+The debate has begun. Other researchers have shared their views above. Now:
+- Respond to points you disagree with
+- Reinforce points you agree with
+- Resolve any conflicting assessments
+- Refine the severity ratings based on the discussion
+
+The goal is to converge on the true security issues.
+`, base)
+
+	return []string{
+		prompt,
+		prompt + "\nFocus on reaching consensus.",
+		prompt + "\nHighlight the most critical issues that need immediate attention.",
+	}
+}
+
+// FinalPrompt creates the synthesis prompt (final round, single agent)
+func (d *Debate) FinalPrompt(perspectives []string, round1, round2 []string) string {
+	// Combine all rounds
+	var allDiscussion strings.Builder
+	allDiscussion.WriteString("## Initial Assessments\n")
 	for i, p := range perspectives {
-		perspectivesText += fmt.Sprintf("\n### Agent %d's Assessment\n%s\n", i+1, p)
+		allDiscussion.WriteString(fmt.Sprintf("### Assessor %d\n%s\n\n", i+1, p))
+	}
+	allDiscussion.WriteString("## Debate Round 1\n")
+	for i, r := range round1 {
+		allDiscussion.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+	}
+	allDiscussion.WriteString("## Debate Round 2\n")
+	for i, r := range round2 {
+		allDiscussion.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
 	}
 
-	// Build repository context section
-	repoContextSection := ""
-	if g.context != nil {
-		if general := g.context.ForPrompt(); general != "" {
-			repoContextSection += "\n" + general + "\n"
-		}
-		if specific := g.context.ForSubsystemPrompt(subsystem); specific != "" {
-			repoContextSection += "\n" + specific + "\n"
+	repoContext := ""
+	if d.context != nil {
+		if general := d.context.ForPrompt(); general != "" {
+			repoContext += "\n" + general + "\n"
 		}
 	}
 
-	baseContext := fmt.Sprintf(`## Codebase Context
+	return fmt.Sprintf(`You are producing the final security report after a thorough peer review.
+
+## Codebase Context
+%s
+
+## Subsystem Reviewed
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+%s
+## Full Discussion
+%s
+
+Based on this complete discussion, produce the FINAL security report:
+
+1. **Confirmed Vulnerabilities** - Issues the reviewers agreed are real and exploitable
+   - Include severity, specific code locations, and exploitation details
+
+2. **Disputed/Unclear** - Issues where reviewers disagreed (note the disagreement)
+
+3. **Dismissed** - Issues determined to be false positives or non-exploitable
+
+4. **Recommendations** - Prioritized remediation steps
+
+Be definitive. This is the final report.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, repoContext, allDiscussion.String())
+}
+
+func (d *Debate) buildBaseContext(perspectives []string, priorRound []string) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf(`## Codebase Context
 %s
 
 ## Subsystem Under Review
 **Name:** %s
 **Paths:** %s
 **Description:** %s
-%s
-## Security Assessments from Initial Review
-%s
-`, plan.Overview, sub.Name, sub.Paths, sub.Description, repoContextSection, perspectivesText)
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description))
 
-	// Generate three debate prompts with different roles
-	prompts := []string{
-		fmt.Sprintf(`You are a security researcher participating in a peer review debate.
-
-%s
-
-## Your Role: The Skeptic
-
-Your job is to critically examine the findings above. For each claimed vulnerability:
-1. Challenge the exploitability - is this actually exploitable in practice?
-2. Question the severity ratings - are they justified?
-3. Identify any false positives or overblown concerns
-4. Point out any missing context that would affect the assessment
-5. BUT also acknowledge findings that ARE valid and serious
-
-If you find the assessments generally sound, propose additional attack vectors they may have missed.
-
-Be rigorous but fair. The goal is to refine the findings to the most actionable and serious issues.`, baseContext),
-
-		fmt.Sprintf(`You are a security researcher participating in a peer review debate.
-
-%s
-
-## Your Role: The Advocate
-
-Your job is to strengthen the case for the valid findings. For each vulnerability:
-1. Provide additional evidence or attack scenarios
-2. Explain the real-world impact more clearly
-3. Connect vulnerabilities that could be chained together
-4. Prioritize which issues need immediate attention
-5. Dismiss findings that truly aren't exploitable
-
-Also identify any security issues the other agents missed entirely.
-
-Be constructive. The goal is to ensure the most serious issues are clearly communicated.`, baseContext),
-
-		fmt.Sprintf(`You are a security researcher participating in a peer review debate.
-
-%s
-
-## Your Role: The Synthesizer
-
-Your job is to find common ground and synthesize insights. You should:
-1. Identify which findings multiple agents agreed on (these are likely valid)
-2. Resolve disagreements by analyzing the actual code/context
-3. Rank all findings by actual risk (considering both impact and exploitability)
-4. Propose a clear remediation priority order
-5. Call out any gaps in the overall security review
-
-Be balanced. The goal is to produce a coherent, actionable list of security findings.`, baseContext),
+	if d.context != nil {
+		if general := d.context.ForPrompt(); general != "" {
+			b.WriteString("\n" + general + "\n")
+		}
+		if specific := d.context.ForSubsystemPrompt(d.sub.Slug); specific != "" {
+			b.WriteString("\n" + specific + "\n")
+		}
 	}
 
-	return prompts, nil
+	b.WriteString("\n## Initial Security Assessments\n")
+	for i, p := range perspectives {
+		b.WriteString(fmt.Sprintf("### Assessor %d\n%s\n\n", i+1, p))
+	}
+
+	if len(priorRound) > 0 {
+		b.WriteString("## Previous Round Discussion\n")
+		for i, r := range priorRound {
+			b.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+		}
+	}
+
+	return b.String()
 }
