@@ -379,3 +379,24 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// PrintPrompt prints a prompt with a header, truncated if needed
+func PrintPrompt(name string, prompt string, maxLines int) {
+	fmt.Printf("\n%s%s%s\n", ColorCyan, name, Reset)
+	fmt.Printf("%s%s%s\n", Dim, strings.Repeat("─", 40), Reset)
+
+	lines := strings.Split(prompt, "\n")
+	shown := 0
+	for _, line := range lines {
+		if shown >= maxLines {
+			fmt.Printf("%s  ... (%d more lines)%s\n", Dim, len(lines)-shown, Reset)
+			break
+		}
+		// Truncate long lines
+		if len(line) > 100 {
+			line = line[:97] + "..."
+		}
+		fmt.Printf("%s%s%s\n", Dim, line, Reset)
+		shown++
+	}
+}

@@ -96,6 +96,12 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to generate prompts: %w", err)
 	}
 
+	// Show generated prompts
+	for i, prompt := range prompts {
+		display.PrintPrompt(fmt.Sprintf("Agent %d Prompt", i+1), prompt, 15)
+	}
+	fmt.Println()
+
 	// Run 3 assessment agents with status display
 	assessAgents := DistributeAgents(3)
 	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
@@ -118,6 +124,12 @@ func runFull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate debate prompts: %w", err)
 	}
+
+	// Show generated prompts
+	for i, prompt := range debatePrompts {
+		display.PrintPrompt(fmt.Sprintf("Debater %d Prompt", i+1), prompt, 15)
+	}
+	fmt.Println()
 
 	// Run 3 debate agents with status display
 	debateAgents := DistributeAgents(3)
