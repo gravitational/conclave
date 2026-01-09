@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/plan"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
@@ -52,14 +51,8 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create agent
-	var ag agent.Agent
-	if UseClaude() {
-		ag = agent.NewClaudeAgent()
-		printStatus("Using Claude CLI for analysis...")
-	} else {
-		ag = agent.NewCodexAgent()
-		printStatus("Using Codex CLI for analysis...")
-	}
+	ag := CreateAgent()
+	printStatus("Using %s CLI for analysis...", AgentBackend())
 
 	// Generate plan
 	printStatus("Analyzing codebase at %s...", absPath)

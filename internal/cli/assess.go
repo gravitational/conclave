@@ -76,14 +76,8 @@ func runAssess(cmd *cobra.Command, args []string) error {
 	printStatus("")
 
 	// Create agents
-	var createAgent func() agent.Agent
-	if UseClaude() {
-		createAgent = func() agent.Agent { return agent.NewClaudeAgent() }
-		printStatus("Using Claude CLI for assessment...")
-	} else {
-		createAgent = func() agent.Agent { return agent.NewCodexAgent() }
-		printStatus("Using Codex CLI for assessment...")
-	}
+	createAgent := CreateAgent
+	printStatus("Using %s CLI for assessment...", AgentBackend())
 
 	// Generate assessment prompts using LLM
 	promptGen := assess.NewPromptGenerator(createAgent())

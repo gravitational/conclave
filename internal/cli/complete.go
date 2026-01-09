@@ -65,14 +65,8 @@ func runComplete(cmd *cobra.Command, args []string) error {
 	printStatus("")
 
 	// Create agent
-	var ag agent.Agent
-	if UseClaude() {
-		ag = agent.NewClaudeAgent()
-		printStatus("Using Claude CLI for synthesis...")
-	} else {
-		ag = agent.NewCodexAgent()
-		printStatus("Using Codex CLI for synthesis...")
-	}
+	ag := CreateAgent()
+	printStatus("Using %s CLI for synthesis...", AgentBackend())
 
 	// Find subsystem details
 	var subsystem *state.Subsystem

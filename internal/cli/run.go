@@ -61,18 +61,10 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create agent factory
-	var createAgent func() agent.Agent
-	var agentName string
-	if UseClaude() {
-		createAgent = func() agent.Agent { return agent.NewClaudeAgent() }
-		agentName = "Claude"
-	} else {
-		createAgent = func() agent.Agent { return agent.NewCodexAgent() }
-		agentName = "Codex"
-	}
+	createAgent := CreateAgent
 
 	printStatus("=== CONCLAVE FULL AUDIT ===")
-	printStatus("Using %s CLI", agentName)
+	printStatus("Using %s CLI", AgentBackend())
 	printStatus("")
 
 	// STEP 1: Plan (or load existing)

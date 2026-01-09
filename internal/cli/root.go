@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/spf13/cobra"
 )
 
 var (
 	useClaude bool
+	useGemini bool
 )
 
 var rootCmd = &cobra.Command{
@@ -26,6 +28,7 @@ The workflow consists of:
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&useClaude, "claude", false, "Use Claude CLI instead of Codex")
+	rootCmd.PersistentFlags().BoolVar(&useGemini, "gemini", false, "Use Gemini CLI instead of Codex")
 }
 
 func Execute() error {
@@ -34,6 +37,32 @@ func Execute() error {
 
 func UseClaude() bool {
 	return useClaude
+}
+
+func UseGemini() bool {
+	return useGemini
+}
+
+// AgentBackend returns the name of the selected agent backend
+func AgentBackend() string {
+	if useClaude {
+		return "Claude"
+	}
+	if useGemini {
+		return "Gemini"
+	}
+	return "Codex"
+}
+
+// CreateAgent returns a new agent based on the selected backend
+func CreateAgent() agent.Agent {
+	if useClaude {
+		return agent.NewClaudeAgent()
+	}
+	if useGemini {
+		return agent.NewGeminiAgent()
+	}
+	return agent.NewCodexAgent()
 }
 
 func printError(format string, args ...interface{}) {

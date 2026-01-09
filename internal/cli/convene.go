@@ -67,14 +67,8 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	printStatus("")
 
 	// Create agents
-	var createAgent func() agent.Agent
-	if UseClaude() {
-		createAgent = func() agent.Agent { return agent.NewClaudeAgent() }
-		printStatus("Using Claude CLI for debate...")
-	} else {
-		createAgent = func() agent.Agent { return agent.NewCodexAgent() }
-		printStatus("Using Codex CLI for debate...")
-	}
+	createAgent := CreateAgent
+	printStatus("Using %s CLI for debate...", AgentBackend())
 
 	// Generate debate prompts
 	debateGen := convene.NewDebateGenerator(createAgent())

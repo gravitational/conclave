@@ -26,11 +26,12 @@ Conclave runs a multi-stage security audit pipeline:
 
 ```bash
 go build ./cmd/conclave
-./conclave --claude run    # Uses Claude CLI
 ./conclave run             # Uses Codex CLI (default)
+./conclave --claude run    # Uses Claude CLI
+./conclave --gemini run    # Uses Gemini CLI
 ```
 
 ## Requirements
 
 - Go 1.21+
-- Either [Codex CLI](https://github.com/openai/codex) or [Claude CLI](https://claude.ai/code) installed
+- One of: [Codex CLI](https://github.com/openai/codex), [Claude CLI](https://claude.ai/code), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)

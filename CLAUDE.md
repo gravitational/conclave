@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Conclave is a CLI agent orchestration tool for systematic codebase security auditing. It coordinates multiple LLM agents (via Codex or Claude CLI) to analyze codebases, identify vulnerabilities, and synthesize findings through a multi-stage debate process.
+Conclave is a CLI agent orchestration tool for systematic codebase security auditing. It coordinates multiple LLM agents (via Codex, Claude, or Gemini CLI) to analyze codebases, identify vulnerabilities, and synthesize findings through a multi-stage debate process.
 
 ## Build and Development Commands
 
@@ -30,8 +30,9 @@ conclave convene --subsystem X    # Have agents debate perspectives
 conclave complete --subsystem X   # Synthesize final results
 conclave status                   # Show analysis state
 
-# Use Claude CLI instead of Codex (default)
+# Use Claude or Gemini CLI instead of Codex (default)
 conclave --claude run
+conclave --gemini run
 ```
 
 ## Architecture
@@ -40,14 +41,14 @@ conclave --claude run
 cmd/conclave/main.go          Entry point
 internal/
   cli/                        Cobra commands (root, plan, assess, convene, complete, status)
-  agent/                      Agent interface + Codex/Claude implementations with streaming
+  agent/                      Agent interface + Codex/Claude/Gemini implementations with streaming
   plan/                       Plan generation and parsing
   assess/                     Assessment prompt generation
   convene/                    Debate orchestration
   state/                      .conclave directory management, markdown+frontmatter persistence
 ```
 
-**Agent execution**: Codex uses `codex exec --full-auto -` with prompt via stdin. Claude uses `claude -p <prompt>`. Both stream stdout line-by-line through goroutines.
+**Agent execution**: Codex uses `codex exec --full-auto -` with prompt via stdin. Claude uses `claude -p <prompt>`. Gemini uses `gemini -y` with prompt via stdin. All stream stdout line-by-line through goroutines.
 
 **State files**: Plans, perspectives, debates, and results are stored in `.conclave/` as markdown files with YAML frontmatter. Plans have UUID-based filenames.
 
