@@ -38,6 +38,7 @@ type AgentStatus struct {
 	Activity  string // Current activity description
 	Lines     int    // Lines of output received
 	StartTime time.Time
+	EndTime   time.Time // Set when done/error
 	Error     error
 }
 
@@ -132,6 +133,7 @@ func (sd *StatusDisplay) SetError(idx int, err error) {
 	if status, ok := sd.agents[idx]; ok {
 		status.State = "error"
 		status.Error = err
+		status.EndTime = time.Now()
 	}
 }
 
@@ -142,6 +144,7 @@ func (sd *StatusDisplay) SetDone(idx int) {
 
 	if status, ok := sd.agents[idx]; ok {
 		status.State = "done"
+		status.EndTime = time.Now()
 	}
 }
 
@@ -255,8 +258,13 @@ func (sd *StatusDisplay) formatStatus(status *AgentStatus, spinner string) strin
 		}
 	}
 
-	// Duration
-	elapsed := time.Since(status.StartTime)
+	// Duration - use EndTime if done/error, otherwise keep counting
+	var elapsed time.Duration
+	if !status.EndTime.IsZero() {
+		elapsed = status.EndTime.Sub(status.StartTime)
+	} else {
+		elapsed = time.Since(status.StartTime)
+	}
 	duration := formatDuration(elapsed)
 
 	// Format: ⠋ Agent 1 [Claude]  Analyzing auth... (42 lines, 1m23s)
