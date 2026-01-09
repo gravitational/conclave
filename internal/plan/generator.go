@@ -63,23 +63,29 @@ func NewGenerator(ag agent.Agent, st *state.State) *Generator {
 	}
 }
 
-// Generate creates a new plan for the given codebase path
-func (g *Generator) Generate(codebasePath string) (*state.Plan, error) {
-	// Run agent to analyze codebase
-	output := agent.StreamWithPrefix(g.agent, planPrompt, "Planner", agent.ColorCyan)
+// BuildPrompt returns the prompt for plan generation
+func (g *Generator) BuildPrompt(codebasePath string) string {
+	return planPrompt
+}
 
-	// Parse the output
+// ParseAndSave parses agent output and saves the plan
+func (g *Generator) ParseAndSave(output string, codebasePath string) (*state.Plan, error) {
 	plan, err := g.parseOutput(output, codebasePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse plan output: %w", err)
 	}
 
-	// Save the plan
 	if _, err := g.state.SavePlan(plan); err != nil {
 		return nil, fmt.Errorf("failed to save plan: %w", err)
 	}
 
 	return plan, nil
+}
+
+// Generate creates a new plan for the given codebase path
+func (g *Generator) Generate(codebasePath string) (*state.Plan, error) {
+	output := agent.StreamWithPrefix(g.agent, planPrompt, "Planner", agent.ColorCyan)
+	return g.ParseAndSave(output, codebasePath)
 }
 
 func (g *Generator) parseOutput(output string, codebasePath string) (*state.Plan, error) {

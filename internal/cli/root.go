@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"math/rand"
-	"os"
 	"strings"
 	"time"
 
@@ -199,12 +198,4 @@ func DescribeDistribution(agents []agent.Agent) string {
 		parts = append(parts, fmt.Sprintf("%d×%s", count, strings.Title(name)))
 	}
 	return strings.Join(parts, ", ")
-}
-
-func printError(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
-}
-
-func printStatus(format string, args ...interface{}) {
-	fmt.Printf(format+"\n", args...)
 }

@@ -5,12 +5,12 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/assess"
 	"github.com/rob-picard-teleport/conclave/internal/convene"
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/plan"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
@@ -60,77 +60,58 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
-	printStatus("=== CONCLAVE FULL AUDIT ===")
-	printStatus("Primary: %s | Parallel agents: %s", PrimaryBackend(), AgentBackend())
-	printStatus("")
+	display.PrintHeader("CONCLAVE AUDIT")
+	display.PrintStatus("Providers: %s", AgentBackend())
+	display.PrintStatus("Target: %s", absPath)
 
 	// STEP 1: Plan (or load existing)
-	printStatus("=== STEP 1: PLAN ===")
+	display.PrintHeader("STEP 1: PLAN")
 	var p *state.Plan
 	p, err = st.LoadMostRecentPlan()
 	if err != nil {
-		printStatus("No existing plan found, creating new plan...")
-		printStatus("")
-
+		display.PrintStatus("Creating new plan...")
 		generator := plan.NewGenerator(CreateAgent(), st)
-		p, err = generator.Generate(absPath)
+		output := agent.StreamSilent(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase")
+		p, err = generator.ParseAndSave(output, absPath)
 		if err != nil {
 			return fmt.Errorf("failed to generate plan: %w", err)
 		}
+		display.PrintSuccess("Plan created: %s", p.Name)
 	} else {
-		printStatus("Using existing plan: %s (%s)", p.Name, p.ID[:8])
+		display.PrintSuccess("Using existing plan: %s", p.Name)
 	}
-
-	printStatus("")
-	printStatus("Plan: %s", p.Name)
-	printStatus("Subsystems: %d", len(p.Subsystems))
-	printStatus("")
+	display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
 
 	// STEP 2: Assess random subsystem
-	printStatus("=== STEP 2: ASSESS ===")
+	display.PrintHeader("STEP 2: ASSESS")
 	rand.Seed(time.Now().UnixNano())
 	subsystem := &p.Subsystems[rand.Intn(len(p.Subsystems))]
-	printStatus("Selected subsystem: %s", subsystem.Name)
-	printStatus("")
+	display.PrintStatus("Target subsystem: %s", subsystem.Name)
+	fmt.Println()
 
-	// Generate assessment prompts using primary agent
+	// Generate assessment prompts
 	promptGen := assess.NewPromptGenerator(CreateAgent())
 	prompts, err := promptGen.GeneratePrompts(p, subsystem)
 	if err != nil {
 		return fmt.Errorf("failed to generate prompts: %w", err)
 	}
 
-	// Distribute agents across enabled providers
+	// Run 3 assessment agents with status display
 	assessAgents := DistributeAgents(3)
-	printStatus("Running 3 parallel assessment agents (%s)...", DescribeDistribution(assessAgents))
-	printStatus("")
-
-	var wg sync.WaitGroup
-	perspectives := make([]string, 3)
-	colors := []string{agent.ColorRed, agent.ColorGreen, agent.ColorBlue}
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			ag := assessAgents[idx]
-			prefix := fmt.Sprintf("Agent %d [%s]", idx+1, ag.Name())
-			perspectives[idx] = agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
-		}(i)
-	}
-	wg.Wait()
+	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
+	perspectives := agent.StreamMultipleWithStatus(assessAgents, prompts, names)
 
 	// Save perspectives
 	for i, content := range perspectives {
 		st.SavePerspective(p.ID, subsystem.Slug, i+1, content)
 	}
-
-	printStatus("")
-	printStatus("Assessment complete!")
-	printStatus("")
+	fmt.Println()
+	display.PrintSuccess("Assessment complete")
 
 	// STEP 3: Convene
-	printStatus("=== STEP 3: CONVENE ===")
+	display.PrintHeader("STEP 3: CONVENE")
+	display.PrintStatus("Agents will debate and refine findings")
+	fmt.Println()
 
 	debateGen := convene.NewDebateGenerator(CreateAgent())
 	debatePrompts, err := debateGen.GeneratePrompts(p, subsystem.Slug, perspectives)
@@ -138,41 +119,22 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to generate debate prompts: %w", err)
 	}
 
-	// Distribute agents across enabled providers
+	// Run 3 debate agents with status display
 	debateAgents := DistributeAgents(3)
-	printStatus("Running 3 parallel debate agents (%s)...", DescribeDistribution(debateAgents))
-	printStatus("")
-
-	debates := make([]string, 3)
-	debateColors := []string{agent.ColorMagenta, agent.ColorCyan, agent.ColorYellow}
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			ag := debateAgents[idx]
-			prefix := fmt.Sprintf("Debater %d [%s]", idx+1, ag.Name())
-			debates[idx] = agent.StreamWithPrefix(ag, debatePrompts[idx], prefix, debateColors[idx])
-		}(i)
-	}
-	wg.Wait()
+	debateNames := []string{"Debater 1", "Debater 2", "Debater 3"}
+	debates := agent.StreamMultipleWithStatus(debateAgents, debatePrompts, debateNames)
 
 	// Save debates
 	for i, content := range debates {
 		st.SaveDebate(p.ID, subsystem.Slug, i+1, content)
 	}
-
-	printStatus("")
-	printStatus("Debate complete!")
-	printStatus("")
+	fmt.Println()
+	display.PrintSuccess("Debate complete")
 
 	// STEP 4: Complete
-	printStatus("=== STEP 4: COMPLETE ===")
-	printStatus("Synthesizing final results with %s...", PrimaryBackend())
-	printStatus("")
-
+	display.PrintHeader("STEP 4: SYNTHESIZE")
 	synthesisPrompt := generateSynthesisPrompt(p, subsystem, debates)
-	result := agent.StreamWithPrefix(CreateAgent(), synthesisPrompt, "Synthesis", agent.ColorWhite)
+	result := agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing findings")
 
 	// Save result
 	resultPath, err := st.SaveResult(p.ID, subsystem.Slug, result)
@@ -180,10 +142,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save result: %w", err)
 	}
 
-	printStatus("")
-	printStatus("=== AUDIT COMPLETE ===")
-	printStatus("Subsystem: %s", subsystem.Name)
-	printStatus("Results saved to: %s", resultPath)
+	display.PrintHeader("AUDIT COMPLETE")
+	display.PrintSuccess("Subsystem: %s", subsystem.Name)
+	display.PrintSuccess("Results: %s", resultPath)
 
 	return nil
 }

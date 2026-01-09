@@ -3,18 +3,18 @@ package cli
 import (
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/assess"
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
 
 var (
-	assessPlanID     string
-	assessSubsystem  string
+	assessPlanID    string
+	assessSubsystem string
 )
 
 var assessCmd = &cobra.Command{
@@ -51,7 +51,8 @@ func runAssess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	printStatus("Using plan: %s (%s)", p.Name, p.ID)
+	display.PrintHeader("ASSESS")
+	display.PrintStatus("Plan: %s", p.Name)
 
 	// Select subsystem
 	var subsystem *state.Subsystem
@@ -66,63 +67,38 @@ func runAssess(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("subsystem not found: %s", assessSubsystem)
 		}
 	} else {
-		// Pick random subsystem
 		rand.Seed(time.Now().UnixNano())
 		idx := rand.Intn(len(p.Subsystems))
 		subsystem = &p.Subsystems[idx]
 	}
 
-	printStatus("Assessing subsystem: %s", subsystem.Name)
-	printStatus("")
+	display.PrintStatus("Subsystem: %s", subsystem.Name)
+	display.PrintStatus("Providers: %s", AgentBackend())
+	fmt.Println()
 
-	// Generate assessment prompts using primary LLM
-	printStatus("Using %s CLI for prompt generation...", PrimaryBackend())
+	// Generate assessment prompts
 	promptGen := assess.NewPromptGenerator(CreateAgent())
 	prompts, err := promptGen.GeneratePrompts(p, subsystem)
 	if err != nil {
 		return fmt.Errorf("failed to generate assessment prompts: %w", err)
 	}
 
-	// Distribute agents across enabled providers
+	// Run 3 agents with status display
 	agents := DistributeAgents(3)
-	printStatus("")
-	printStatus("Starting 3 parallel agents (%s)...", DescribeDistribution(agents))
-	printStatus("")
+	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
+	results := agent.StreamMultipleWithStatus(agents, prompts, names)
 
-	// Run 3 agents in parallel
-	var wg sync.WaitGroup
-	perspectives := make([]*assess.Perspective, 3)
-	colors := []string{agent.ColorRed, agent.ColorGreen, agent.ColorBlue}
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			ag := agents[idx]
-			prefix := fmt.Sprintf("Agent %d [%s]", idx+1, ag.Name())
-
-			output := agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
-			perspectives[idx] = &assess.Perspective{
-				AgentID:    idx + 1,
-				Subsystem:  subsystem.Slug,
-				Content:    output,
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	printStatus("")
-	printStatus("Assessment complete!")
+	fmt.Println()
+	display.PrintSuccess("Assessment complete")
 
 	// Save perspectives
-	for _, persp := range perspectives {
-		path, err := st.SavePerspective(p.ID, subsystem.Slug, persp.AgentID, persp.Content)
+	for i, content := range results {
+		path, err := st.SavePerspective(p.ID, subsystem.Slug, i+1, content)
 		if err != nil {
-			printError("failed to save perspective %d: %v", persp.AgentID, err)
+			display.PrintError("Failed to save perspective %d: %v", i+1, err)
 			continue
 		}
-		printStatus("Saved perspective %d to: %s", persp.AgentID, path)
+		display.PrintSuccess("Saved: %s", path)
 	}
 
 	return nil

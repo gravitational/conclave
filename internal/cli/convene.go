@@ -2,10 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/convene"
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +51,9 @@ func runConvene(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	printStatus("Using plan: %s (%s)", p.Name, p.ID)
+	display.PrintHeader("CONVENE")
+	display.PrintStatus("Plan: %s", p.Name)
+	display.PrintStatus("Subsystem: %s", conveneSubsystem)
 
 	// Load perspectives
 	perspectives, err := st.LoadPerspectives(p.ID, conveneSubsystem)
@@ -60,55 +62,36 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(perspectives) == 0 {
-		return fmt.Errorf("no perspectives found for subsystem %s - run 'conclave assess' first", conveneSubsystem)
+		return fmt.Errorf("no perspectives found - run 'conclave assess' first")
 	}
 
-	printStatus("Loaded %d perspectives for subsystem: %s", len(perspectives), conveneSubsystem)
-	printStatus("")
+	display.PrintStatus("Loaded %d perspectives", len(perspectives))
+	display.PrintStatus("Providers: %s", AgentBackend())
+	fmt.Println()
 
-	// Generate debate prompts using primary LLM
-	printStatus("Using %s CLI for prompt generation...", PrimaryBackend())
+	// Generate debate prompts
 	debateGen := convene.NewDebateGenerator(CreateAgent())
 	prompts, err := debateGen.GeneratePrompts(p, conveneSubsystem, perspectives)
 	if err != nil {
 		return fmt.Errorf("failed to generate debate prompts: %w", err)
 	}
 
-	// Distribute agents across enabled providers
+	// Run 3 agents with status display
 	agents := DistributeAgents(3)
-	printStatus("")
-	printStatus("Starting debate with 3 agents (%s)...", DescribeDistribution(agents))
-	printStatus("")
+	names := []string{"Debater 1", "Debater 2", "Debater 3"}
+	debates := agent.StreamMultipleWithStatus(agents, prompts, names)
 
-	// Run 3 agents in parallel
-	var wg sync.WaitGroup
-	debates := make([]string, 3)
-	colors := []string{agent.ColorMagenta, agent.ColorCyan, agent.ColorYellow}
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			ag := agents[idx]
-			prefix := fmt.Sprintf("Debater %d [%s]", idx+1, ag.Name())
-
-			debates[idx] = agent.StreamWithPrefix(ag, prompts[idx], prefix, colors[idx])
-		}(i)
-	}
-
-	wg.Wait()
-
-	printStatus("")
-	printStatus("Debate complete!")
+	fmt.Println()
+	display.PrintSuccess("Debate complete")
 
 	// Save debate outputs
 	for i, content := range debates {
 		path, err := st.SaveDebate(p.ID, conveneSubsystem, i+1, content)
 		if err != nil {
-			printError("failed to save debate %d: %v", i+1, err)
+			display.PrintError("Failed to save debate %d: %v", i+1, err)
 			continue
 		}
-		printStatus("Saved debate %d to: %s", i+1, path)
+		display.PrintSuccess("Saved: %s", path)
 	}
 
 	return nil

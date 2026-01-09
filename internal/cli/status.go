@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -29,36 +30,42 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list plans: %w", err)
 	}
 
+	display.PrintHeader("STATUS")
+
 	if len(plans) == 0 {
-		printStatus("No plans found. Run 'conclave plan' to get started.")
+		display.PrintStatus("No plans found. Run 'conclave plan' to get started.")
 		return nil
 	}
 
-	printStatus("Plans:")
 	for _, p := range plans {
-		printStatus("  - %s (%s)", p.Name, p.ID)
-		printStatus("    Created: %s", p.Created.Format("2006-01-02 15:04:05"))
-		printStatus("    Subsystems: %d", len(p.Subsystems))
+		fmt.Printf("\n%s%s%s (%s)\n", display.Bold, p.Name, display.Reset, p.ID[:8])
+		display.PrintStatus("Created: %s", p.Created.Format("2006-01-02 15:04"))
+		fmt.Println()
 
-		// Check assessment status for each subsystem
 		for _, sub := range p.Subsystems {
 			perspectives, _ := st.LoadPerspectives(p.ID, sub.Slug)
 			debates, _ := st.LoadDebates(p.ID, sub.Slug)
 			result, _ := st.LoadResult(p.ID, sub.Slug)
 
-			status := "not started"
+			var status, color string
 			if result != "" {
-				status = "complete"
+				status = "✓ complete"
+				color = display.ColorGreen
 			} else if len(debates) > 0 {
-				status = "debated"
+				status = "◐ debated"
+				color = display.ColorYellow
 			} else if len(perspectives) > 0 {
-				status = "assessed"
+				status = "◐ assessed"
+				color = display.ColorYellow
+			} else {
+				status = "○ pending"
+				color = display.Dim
 			}
 
-			printStatus("      - %s: %s", sub.Name, status)
+			fmt.Printf("  %s%-20s%s %s%s%s\n", display.Dim, sub.Slug, display.Reset, color, status, display.Reset)
 		}
-		printStatus("")
 	}
+	fmt.Println()
 
 	return nil
 }

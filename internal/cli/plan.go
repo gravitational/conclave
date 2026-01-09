@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/plan"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
@@ -35,7 +37,6 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
 
-	// Verify path exists
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return fmt.Errorf("path does not exist: %w", err)
@@ -50,26 +51,29 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
-	// Create agent
-	ag := CreateAgent()
-	printStatus("Using %s CLI for analysis...", AgentBackend())
+	display.PrintHeader("PLAN")
+	display.PrintStatus("Target: %s", absPath)
+	display.PrintStatus("Provider: %s", PrimaryBackend())
+	fmt.Println()
 
 	// Generate plan
-	printStatus("Analyzing codebase at %s...", absPath)
-	printStatus("")
-
+	ag := CreateAgent()
 	generator := plan.NewGenerator(ag, st)
-	p, err := generator.Generate(absPath)
+	output := agent.StreamSilent(ag, generator.BuildPrompt(absPath), "Analyzing codebase")
+
+	p, err := generator.ParseAndSave(output, absPath)
 	if err != nil {
 		return fmt.Errorf("failed to generate plan: %w", err)
 	}
 
-	printStatus("")
-	printStatus("Plan created: %s", p.ID)
-	printStatus("Name: %s", p.Name)
-	printStatus("Subsystems identified: %d", len(p.Subsystems))
-	printStatus("")
-	printStatus("Plan saved to: %s", st.PlanPath(p.ID, p.Slug()))
+	fmt.Println()
+	display.PrintSuccess("Plan created: %s", p.Name)
+	display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
+	for _, sub := range p.Subsystems {
+		display.PrintStatus("  • %s", sub.Name)
+	}
+	fmt.Println()
+	display.PrintSuccess("Saved: %s", st.PlanPath(p.ID, p.Slug()))
 
 	return nil
 }

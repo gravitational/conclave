@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -49,7 +50,9 @@ func runComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	printStatus("Using plan: %s (%s)", p.Name, p.ID)
+	display.PrintHeader("SYNTHESIZE")
+	display.PrintStatus("Plan: %s", p.Name)
+	display.PrintStatus("Subsystem: %s", completeSubsystem)
 
 	// Load debates
 	debates, err := st.LoadDebates(p.ID, completeSubsystem)
@@ -58,15 +61,12 @@ func runComplete(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(debates) == 0 {
-		return fmt.Errorf("no debates found for subsystem %s - run 'conclave convene' first", completeSubsystem)
+		return fmt.Errorf("no debates found - run 'conclave convene' first")
 	}
 
-	printStatus("Loaded %d debate outputs for subsystem: %s", len(debates), completeSubsystem)
-	printStatus("")
-
-	// Create agent
-	ag := CreateAgent()
-	printStatus("Using %s CLI for synthesis...", AgentBackend())
+	display.PrintStatus("Loaded %d debate outputs", len(debates))
+	display.PrintStatus("Provider: %s", PrimaryBackend())
+	fmt.Println()
 
 	// Find subsystem details
 	var subsystem *state.Subsystem
@@ -80,18 +80,9 @@ func runComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("subsystem not found in plan: %s", completeSubsystem)
 	}
 
-	// Generate synthesis prompt
+	// Generate synthesis
 	prompt := generateSynthesisPrompt(p, subsystem, debates)
-
-	printStatus("")
-	printStatus("Synthesizing final results...")
-	printStatus("")
-
-	// Run synthesis
-	result := agent.StreamWithPrefix(ag, prompt, "Synthesis", agent.ColorWhite)
-
-	printStatus("")
-	printStatus("Synthesis complete!")
+	result := agent.StreamSilent(CreateAgent(), prompt, "Synthesizing findings")
 
 	// Save result
 	path, err := st.SaveResult(p.ID, completeSubsystem, result)
@@ -99,7 +90,8 @@ func runComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save result: %w", err)
 	}
 
-	printStatus("Final results saved to: %s", path)
+	fmt.Println()
+	display.PrintSuccess("Results saved: %s", path)
 
 	return nil
 }
