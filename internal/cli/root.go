@@ -106,6 +106,28 @@ func CreateAgent() agent.Agent {
 	return createAgentByName(strings.ToLower(PrimaryBackend()))
 }
 
+// CreateResilientAgent returns an agent with automatic failover to other providers
+func CreateResilientAgent() agent.Agent {
+	providers := enabledProviders()
+	if len(providers) == 1 {
+		return createAgentByName(providers[0])
+	}
+
+	// Primary is the first specified provider
+	primary := createAgentByName(strings.ToLower(PrimaryBackend()))
+
+	// Build fallback list from other enabled providers
+	var fallbacks []agent.Agent
+	primaryName := strings.ToLower(PrimaryBackend())
+	for _, p := range providers {
+		if p != primaryName {
+			fallbacks = append(fallbacks, createAgentByName(p))
+		}
+	}
+
+	return agent.NewResilientAgent(primary, fallbacks)
+}
+
 // createAgentByName creates an agent for the given provider name
 func createAgentByName(name string) agent.Agent {
 	switch name {
@@ -118,8 +140,8 @@ func createAgentByName(name string) agent.Agent {
 	}
 }
 
-// DistributeAgents returns n agents distributed across enabled providers
-// Each agent is randomly assigned to one of the enabled providers
+// DistributeAgents returns n resilient agents distributed across enabled providers
+// Each agent is randomly assigned to one of the enabled providers, with failover to others
 func DistributeAgents(n int) []agent.Agent {
 	providers := enabledProviders()
 	rand.Seed(time.Now().UnixNano())
@@ -127,7 +149,7 @@ func DistributeAgents(n int) []agent.Agent {
 	agents := make([]agent.Agent, n)
 
 	if len(providers) == 1 {
-		// Single provider - all agents use it
+		// Single provider - all agents use it (no failover possible)
 		for i := 0; i < n; i++ {
 			agents[i] = createAgentByName(providers[0])
 		}
@@ -160,9 +182,24 @@ func DistributeAgents(n int) []agent.Agent {
 		assigned[i], assigned[j] = assigned[j], assigned[i]
 	})
 
-	// Create agents
+	// Create resilient agents with failover capability
 	for i := 0; i < n; i++ {
-		agents[i] = createAgentByName(assigned[i])
+		primary := createAgentByName(assigned[i])
+
+		// Build fallback list from other providers
+		var fallbacks []agent.Agent
+		for _, p := range providers {
+			if p != assigned[i] {
+				fallbacks = append(fallbacks, createAgentByName(p))
+			}
+		}
+
+		// Shuffle fallbacks for variety
+		rand.Shuffle(len(fallbacks), func(a, b int) {
+			fallbacks[a], fallbacks[b] = fallbacks[b], fallbacks[a]
+		})
+
+		agents[i] = agent.NewResilientAgent(primary, fallbacks)
 	}
 
 	return agents
