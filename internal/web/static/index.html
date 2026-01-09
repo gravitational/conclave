@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conclave Dashboard</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #f0f6fc;
+        }
+
+        .phase-badge {
+            background: #238636;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .phase-badge.plan { background: #1f6feb; }
+        .phase-badge.assess { background: #a371f7; }
+        .phase-badge.convene { background: #f78166; }
+        .phase-badge.synthesize { background: #238636; }
+
+        .connection-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #f85149;
+        }
+
+        .status-dot.connected { background: #3fb950; }
+
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            height: calc(100vh - 57px);
+        }
+
+        .sidebar {
+            background: #161b22;
+            border-right: 1px solid #30363d;
+            overflow-y: auto;
+        }
+
+        .agent-list {
+            padding: 16px;
+        }
+
+        .agent-card {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .agent-card:hover {
+            border-color: #58a6ff;
+        }
+
+        .agent-card.selected {
+            border-color: #58a6ff;
+            background: #1c2128;
+        }
+
+        .agent-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .agent-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #484f58;
+        }
+
+        .agent-status.waiting { background: #484f58; }
+        .agent-status.running {
+            background: #3fb950;
+            animation: pulse 1.5s infinite;
+        }
+        .agent-status.done { background: #3fb950; }
+        .agent-status.error { background: #f85149; }
+        .agent-status.killed { background: #f0883e; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .agent-name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .agent-provider {
+            font-size: 12px;
+            color: #8b949e;
+            margin-left: auto;
+        }
+
+        .agent-provider.claude { color: #a371f7; }
+        .agent-provider.gemini { color: #58a6ff; }
+        .agent-provider.codex { color: #3fb950; }
+
+        .agent-activity {
+            font-size: 12px;
+            color: #8b949e;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-stats {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #8b949e;
+        }
+
+        .main-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #161b22;
+        }
+
+        .log-filter {
+            display: flex;
+            gap: 8px;
+        }
+
+        .filter-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .filter-btn:hover {
+            background: #30363d;
+        }
+
+        .filter-btn.active {
+            background: #1f6feb;
+            border-color: #1f6feb;
+        }
+
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            display: flex;
+            gap: 8px;
+            padding: 2px 0;
+        }
+
+        .log-line:hover {
+            background: #161b22;
+        }
+
+        .log-agent {
+            color: #8b949e;
+            min-width: 80px;
+        }
+
+        .log-agent.claude { color: #a371f7; }
+        .log-agent.gemini { color: #58a6ff; }
+        .log-agent.codex { color: #3fb950; }
+
+        .log-content {
+            flex: 1;
+            word-break: break-all;
+        }
+
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #8b949e;
+        }
+
+        .prompt-viewer {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .prompt-header {
+            padding: 8px 12px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 12px;
+            position: sticky;
+            top: 0;
+            background: #161b22;
+        }
+
+        .prompt-content {
+            padding: 12px;
+            font-family: monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            color: #8b949e;
+        }
+
+        .kill-btn {
+            background: #da3633;
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .agent-card:hover .kill-btn {
+            opacity: 1;
+        }
+
+        .kill-btn:hover {
+            background: #f85149;
+        }
+
+        .kill-btn:disabled {
+            background: #484f58;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .kill-all-btn {
+            background: #da3633;
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .kill-all-btn:hover {
+            background: #f85149;
+        }
+
+        .kill-all-btn:disabled {
+            background: #484f58;
+            cursor: not-allowed;
+        }
+
+        .agent-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            animation: slideIn 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.success {
+            border-color: #3fb950;
+        }
+
+        .toast.error {
+            border-color: #f85149;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Conclave</h1>
+        <span class="phase-badge" id="phase">Connecting...</span>
+        <button class="kill-all-btn" onclick="killAllAgents()" id="kill-all-btn">Kill All</button>
+        <div class="connection-status">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="connection-text">Disconnected</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="agent-list" id="agent-list">
+                <div class="empty-state">Waiting for agents...</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="log-header">
+                <span>Logs</span>
+                <div class="log-filter">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                </div>
+                <button class="filter-btn" onclick="clearLogs()" style="margin-left: auto;">Clear</button>
+                <button class="filter-btn" onclick="toggleAutoScroll()">Auto-scroll: <span id="autoscroll-status">On</span></button>
+            </div>
+            <div class="log-container" id="log-container">
+                <div class="empty-state">No logs yet...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let agents = {};
+        let logs = [];
+        let selectedAgent = null;
+        let autoScroll = true;
+        let filterAgent = 'all';
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('connection-text').textContent = 'Connected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status-dot').classList.remove('connected');
+                document.getElementById('connection-text').textContent = 'Disconnected';
+                setTimeout(connect, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'phase_change':
+                    updatePhase(msg.data);
+                    break;
+                case 'agent_status':
+                    updateAgent(msg.data);
+                    break;
+                case 'agent_log':
+                    addLog(msg.data, msg.timestamp);
+                    break;
+                case 'command_ack':
+                    handleCommandAck(msg.data);
+                    break;
+            }
+        }
+
+        function handleCommandAck(data) {
+            showToast(data.message, data.success ? 'success' : 'error');
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function sendCommand(action, agentId) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showToast('Not connected', 'error');
+                return;
+            }
+            ws.send(JSON.stringify({
+                type: 'command',
+                data: { action: action, agentId: agentId || 0 }
+            }));
+        }
+
+        function killAgent(id) {
+            sendCommand('kill', id);
+        }
+
+        function killAllAgents() {
+            sendCommand('kill_all', 0);
+        }
+
+        function updatePhase(data) {
+            const badge = document.getElementById('phase');
+            badge.textContent = data.phase;
+            badge.className = 'phase-badge ' + data.phase;
+        }
+
+        function updateAgent(data) {
+            agents[data.id] = data;
+            renderAgentList();
+        }
+
+        function renderAgentList() {
+            const container = document.getElementById('agent-list');
+            const agentIds = Object.keys(agents).sort((a, b) => a - b);
+
+            if (agentIds.length === 0) {
+                container.innerHTML = '<div class="empty-state">Waiting for agents...</div>';
+                return;
+            }
+
+            container.innerHTML = agentIds.map(id => {
+                const agent = agents[id];
+                const isSelected = selectedAgent === id;
+                const elapsed = formatDuration(agent.startTime, agent.endTime);
+                const canKill = agent.state === 'running' || agent.state === 'waiting';
+
+                return `
+                    <div class="agent-card ${isSelected ? 'selected' : ''}" onclick="selectAgent(${id})">
+                        <div class="agent-header">
+                            <span class="agent-status ${agent.state}"></span>
+                            <span class="agent-name">${agent.name}</span>
+                            <span class="agent-provider ${agent.provider.toLowerCase()}">${agent.provider}${agent.model ? ' (' + agent.model + ')' : ''}</span>
+                        </div>
+                        <div class="agent-activity">${agent.activity || 'Waiting...'}</div>
+                        <div class="agent-controls">
+                            <div class="agent-stats">
+                                <span>${agent.lines} lines</span>
+                                <span>${elapsed}</span>
+                                <span>${agent.state}</span>
+                            </div>
+                            <button class="kill-btn" onclick="event.stopPropagation(); killAgent(${id})" ${canKill ? '' : 'disabled'}>Kill</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Update filter buttons
+            updateFilterButtons();
+        }
+
+        function updateFilterButtons() {
+            const filterDiv = document.querySelector('.log-filter');
+            const agentIds = Object.keys(agents).sort((a, b) => a - b);
+
+            let html = '<button class="filter-btn ' + (filterAgent === 'all' ? 'active' : '') + '" data-filter="all" onclick="setFilter(\'all\')">All</button>';
+
+            agentIds.forEach(id => {
+                const agent = agents[id];
+                const isActive = filterAgent === id;
+                html += `<button class="filter-btn ${isActive ? 'active' : ''}" data-filter="${id}" onclick="setFilter('${id}')">${agent.name}</button>`;
+            });
+
+            filterDiv.innerHTML = html;
+        }
+
+        function setFilter(filter) {
+            filterAgent = filter;
+            updateFilterButtons();
+            renderLogs();
+        }
+
+        function selectAgent(id) {
+            selectedAgent = selectedAgent === id ? null : id;
+            renderAgentList();
+        }
+
+        function addLog(data, timestamp) {
+            logs.push({
+                agentId: data.agentId,
+                line: data.line,
+                timestamp: timestamp
+            });
+
+            // Keep last 2000 logs
+            if (logs.length > 2000) {
+                logs = logs.slice(-2000);
+            }
+
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('log-container');
+            let filteredLogs = logs;
+
+            if (filterAgent !== 'all') {
+                filteredLogs = logs.filter(l => l.agentId == filterAgent);
+            }
+
+            if (filteredLogs.length === 0) {
+                container.innerHTML = '<div class="empty-state">No logs yet...</div>';
+                return;
+            }
+
+            container.innerHTML = filteredLogs.map(log => {
+                const agent = agents[log.agentId];
+                const providerClass = agent ? agent.provider.toLowerCase() : '';
+                const agentName = agent ? agent.name : `Agent ${log.agentId}`;
+
+                return `
+                    <div class="log-line">
+                        <span class="log-agent ${providerClass}">[${agentName}]</span>
+                        <span class="log-content">${escapeHtml(log.line)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function clearLogs() {
+            logs = [];
+            renderLogs();
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoscroll-status').textContent = autoScroll ? 'On' : 'Off';
+        }
+
+        function formatDuration(startTime, endTime) {
+            const start = new Date(startTime);
+            const end = endTime ? new Date(endTime) : new Date();
+            const seconds = Math.floor((end - start) / 1000);
+
+            if (seconds < 60) return `${seconds}s`;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}m${secs}s`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Update durations every second
+        setInterval(() => {
+            renderAgentList();
+        }, 1000);
+
+        // Connect on load
+        connect();
+    </script>
+</body>
+</html>
