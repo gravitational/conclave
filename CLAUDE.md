@@ -38,6 +38,11 @@ conclave --gemini run
 conclave --multi run                    # All three providers
 conclave --claude --gemini run          # Claude + Gemini
 conclave --claude --codex run           # Claude + Codex
+
+# Additional run flags
+conclave run --web                # Open web dashboard for real-time monitoring
+conclave run --gist               # Create secret GitHub gist of final report
+conclave run --web --gist         # Combine features
 ```
 
 ## Architecture
@@ -58,3 +63,7 @@ internal/
 **State files**: Plans, perspectives, debates, and results are stored in `.conclave/` as markdown files with YAML frontmatter. Plans have UUID-based filenames.
 
 **Parallel agents**: The assess and convene commands run 3 agents concurrently using goroutines, with colored prefixes for real-time output streaming.
+
+**Web dashboard**: When `--web` is used, a WebSocket-based dashboard shows real-time agent output in split panels. The UI displays specific model names (e.g., "claude-sonnet-4.5") when models are explicitly configured.
+
+**Token optimization**: Context is cached and deduplicated across debate rounds to reduce API costs by ~11% per subsystem assessment.

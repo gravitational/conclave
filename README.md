@@ -33,6 +33,14 @@ go build ./cmd/conclave
 ./conclave --claude --codex --gemini run    # All three
 ```
 
+### Additional Flags
+
+```bash
+./conclave run --web                        # Open web dashboard for monitoring
+./conclave run --gist                       # Create secret gist of final report
+./conclave run --web --gist                 # Combine both features
+```
+
 When multiple providers are enabled, parallel agents are distributed across them.
 If one provider errors or hits rate limits, agents automatically fail over to another.
 
