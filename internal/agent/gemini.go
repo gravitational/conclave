@@ -22,6 +22,11 @@ func (a *GeminiAgent) Name() string {
 	return "gemini"
 }
 
+// Model returns the specific model being used
+func (a *GeminiAgent) Model() string {
+	return a.model
+}
+
 // Run executes a prompt using the Gemini CLI
 func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)

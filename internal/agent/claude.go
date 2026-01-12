@@ -21,6 +21,11 @@ func (a *ClaudeAgent) Name() string {
 	return "claude"
 }
 
+// Model returns the specific model being used
+func (a *ClaudeAgent) Model() string {
+	return a.model
+}
+
 // Run executes a prompt using the Claude CLI
 func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)

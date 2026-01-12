@@ -679,10 +679,11 @@
             if (!header) return;
 
             const providerClass = agent.provider.toLowerCase();
+            const displayModel = agent.model || agent.provider;
             header.innerHTML = `
                 <span class="agent-status ${agent.state}"></span>
                 <span class="agent-name">${agent.name}</span>
-                <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                <span class="agent-provider ${providerClass}">${displayModel}</span>
                 <span class="agent-stats">${agent.lines} lines</span>
                 <button class="kill-btn" onclick="killAgent(${id})" ${agent.state === 'running' ? '' : 'disabled'}>Kill</button>
             `;
@@ -723,13 +724,14 @@
             container.innerHTML = agentIds.map(id => {
                 const agent = currentAgents[id];
                 const providerClass = agent.provider.toLowerCase();
+                const displayModel = agent.model || agent.provider;
 
                 return `
                     <div class="agent-panel" data-agent-id="${id}">
                         <div class="agent-panel-header">
                             <span class="agent-status ${agent.state}"></span>
                             <span class="agent-name">${agent.name}</span>
-                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                            <span class="agent-provider ${providerClass}">${displayModel}</span>
                             <span class="agent-stats">${agent.lines} lines</span>
                             <button class="kill-btn" onclick="killAgent(${id})" ${agent.state === 'running' ? '' : 'disabled'}>Kill</button>
                         </div>
@@ -794,13 +796,14 @@
                 const elapsed = formatDuration(agent.startTime, agent.endTime);
                 const canKill = agent.state === 'running' || agent.state === 'waiting';
                 const providerClass = agent.provider.toLowerCase();
+                const displayModel = agent.model || agent.provider;
 
                 return `
                     <div class="agent-card">
                         <div class="agent-header">
                             <span class="agent-status ${agent.state}"></span>
                             <span class="agent-name">${agent.name}</span>
-                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                            <span class="agent-provider ${providerClass}">${displayModel}</span>
                         </div>
                         <div class="agent-activity">${agent.activity || 'Waiting...'}</div>
                         <div class="agent-stats">
@@ -852,13 +855,14 @@
             return phase.agents.map(agent => {
                 const providerClass = agent.provider.toLowerCase();
                 const duration = formatDuration(agent.startTime, agent.endTime);
+                const displayModel = agent.model || agent.provider;
 
                 return `
                     <div class="phase-agent">
                         <div class="phase-agent-header">
                             <span class="agent-status ${agent.state}"></span>
                             <span class="agent-name">${agent.name}</span>
-                            <span class="agent-provider ${providerClass}">${agent.provider}</span>
+                            <span class="agent-provider ${providerClass}">${displayModel}</span>
                             <span style="margin-left: auto; color: #8b949e;">${agent.lines} lines | ${duration}</span>
                         </div>
                         <div class="phase-agent-output markdown-content">

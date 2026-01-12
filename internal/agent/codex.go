@@ -22,6 +22,11 @@ func (a *CodexAgent) Name() string {
 	return "codex"
 }
 
+// Model returns the specific model being used
+func (a *CodexAgent) Model() string {
+	return a.model
+}
+
 // Run executes a prompt using the Codex CLI
 func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)
