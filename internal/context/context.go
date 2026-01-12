@@ -262,7 +262,8 @@ func (c *RepoContext) SetOverview(overview string) {
 }
 
 // ForPrompt generates a text summary suitable for including in agent prompts
-func (c *RepoContext) ForPrompt() string {
+// If brief is true, excludes overview and all subsystem notes to save tokens
+func (c *RepoContext) ForPrompt(brief bool) string {
 	if c.isEmpty() {
 		return ""
 	}
@@ -270,7 +271,8 @@ func (c *RepoContext) ForPrompt() string {
 	var b strings.Builder
 	b.WriteString("=== REPOSITORY CONTEXT (from previous audits) ===\n\n")
 
-	if c.Overview != "" {
+	// Skip overview in brief mode (it's usually included elsewhere)
+	if !brief && c.Overview != "" {
 		b.WriteString("OVERVIEW:\n")
 		b.WriteString(c.Overview)
 		b.WriteString("\n\n")
@@ -300,7 +302,8 @@ func (c *RepoContext) ForPrompt() string {
 		b.WriteString("\n")
 	}
 
-	if len(c.SubsystemNotes) > 0 {
+	// Skip all subsystem notes in brief mode (only current subsystem is relevant)
+	if !brief && len(c.SubsystemNotes) > 0 {
 		b.WriteString("SUBSYSTEM-SPECIFIC NOTES:\n")
 		for subsystem, notes := range c.SubsystemNotes {
 			b.WriteString(fmt.Sprintf("[%s]: %s\n", subsystem, notes))
@@ -308,7 +311,8 @@ func (c *RepoContext) ForPrompt() string {
 		b.WriteString("\n")
 	}
 
-	if len(c.Findings) > 0 {
+	// Skip all findings in brief mode (to reduce token usage)
+	if !brief && len(c.Findings) > 0 {
 		b.WriteString("PREVIOUSLY CONFIRMED FINDINGS (already known, don't re-report unless status changed):\n")
 		for _, f := range c.Findings {
 			b.WriteString(fmt.Sprintf("- [%s] %s (%s): %s\n", f.Subsystem, f.Title, f.Status, f.Description))

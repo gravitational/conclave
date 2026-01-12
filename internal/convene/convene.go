@@ -63,10 +63,20 @@ Be specific. Reference the actual code and explain your reasoning.
 }
 
 // Round2Prompts creates prompts for the second round (respond to each other)
+// Note: Does not repeat base context from Round 1 to save tokens
 func (d *Debate) Round2Prompts(perspectives []string, round1 []string) []string {
-	base := d.buildBaseContext(perspectives, round1)
+	var b strings.Builder
+
+	// Only include the Round 1 discussion, not the full base context
+	// (agents already saw context in Round 1)
+	b.WriteString("## Round 1 Discussion\n")
+	for i, r := range round1 {
+		b.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+	}
 
 	prompt := fmt.Sprintf(`You are a security researcher in a peer review discussion.
+
+Refer to the codebase context and initial security assessments from Round 1.
 
 %s
 
@@ -77,7 +87,7 @@ The debate has begun. Other researchers have shared their views above. Now:
 - Refine the severity ratings based on the discussion
 
 The goal is to converge on the true security issues.
-`, base)
+`, b.String())
 
 	return []string{
 		prompt,
@@ -87,8 +97,9 @@ The goal is to converge on the true security issues.
 }
 
 // FinalPrompt creates the synthesis prompt (final round, single agent)
+// Note: Does not repeat base context from previous rounds to save tokens
 func (d *Debate) FinalPrompt(perspectives []string, round1, round2 []string) string {
-	// Combine all rounds
+	// Combine all rounds (without repeating base context)
 	var allDiscussion strings.Builder
 	allDiscussion.WriteString("## Initial Assessments\n")
 	for i, p := range perspectives {
@@ -103,23 +114,10 @@ func (d *Debate) FinalPrompt(perspectives []string, round1, round2 []string) str
 		allDiscussion.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
 	}
 
-	repoContext := ""
-	if d.context != nil {
-		if general := d.context.ForPrompt(); general != "" {
-			repoContext += "\n" + general + "\n"
-		}
-	}
-
 	return fmt.Sprintf(`You are producing the final security report after a thorough peer review.
 
-## Codebase Context
-%s
+Refer to the codebase context and subsystem details provided in previous rounds.
 
-## Subsystem Reviewed
-**Name:** %s
-**Paths:** %s
-**Description:** %s
-%s
 ## Full Discussion
 %s
 
@@ -135,7 +133,7 @@ Based on this complete discussion, produce the FINAL security report:
 4. **Recommendations** - Prioritized remediation steps
 
 Be definitive. This is the final report.
-`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, repoContext, allDiscussion.String())
+`, allDiscussion.String())
 }
 
 func (d *Debate) buildBaseContext(perspectives []string, priorRound []string) string {
@@ -151,7 +149,7 @@ func (d *Debate) buildBaseContext(perspectives []string, priorRound []string) st
 `, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description))
 
 	if d.context != nil {
-		if general := d.context.ForPrompt(); general != "" {
+		if general := d.context.ForPrompt(false); general != "" { // Use full context for Round 1
 			b.WriteString("\n" + general + "\n")
 		}
 		if specific := d.context.ForSubsystemPrompt(d.sub.Slug); specific != "" {

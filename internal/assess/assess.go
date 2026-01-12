@@ -10,8 +10,9 @@ import (
 
 // PromptGenerator generates assessment prompts using an LLM
 type PromptGenerator struct {
-	agent   agent.Agent
-	context *context.RepoContext
+	agent             agent.Agent
+	context           *context.RepoContext
+	useDynamicPrompts bool // When true, uses LLM to generate prompts; false uses static prompts
 }
 
 // NewPromptGenerator creates a new prompt generator
@@ -25,13 +26,26 @@ func (g *PromptGenerator) WithContext(ctx *context.RepoContext) *PromptGenerator
 	return g
 }
 
+// WithDynamicPrompts enables dynamic prompt generation using an LLM
+// By default, static prompts are used for consistency and token savings
+func (g *PromptGenerator) WithDynamicPrompts() *PromptGenerator {
+	g.useDynamicPrompts = true
+	return g
+}
+
 // GeneratePrompts creates 3 unique prompts for assessing a subsystem
 func (g *PromptGenerator) GeneratePrompts(plan *state.Plan, subsystem *state.Subsystem) ([]string, error) {
+	// Cache context generation (optimization: generate once, use in both paths)
+	var generalContext, subsystemContext string
+	if g.context != nil {
+		generalContext = g.context.ForPrompt(false) // Use full context for assessment stage
+		subsystemContext = g.context.ForSubsystemPrompt(subsystem.Slug)
+	}
+
 	// Build context section for the meta-prompt
 	contextInstructions := ""
-	if g.context != nil {
-		if general := g.context.ForPrompt(); general != "" {
-			contextInstructions = fmt.Sprintf(`
+	if generalContext != "" {
+		contextInstructions = fmt.Sprintf(`
 ## Repository Context (from previous audits)
 The following context has been learned from previous audits. Include relevant parts in each prompt:
 
@@ -42,12 +56,14 @@ IMPORTANT: Each generated prompt MUST include instructions to:
 - Pay special attention to the focus areas
 - Skip any ignore patterns
 - Not re-report previously confirmed findings unless their status has changed
-`, general)
-		}
+`, generalContext)
 	}
 
-	// Generate prompts dynamically using the LLM
-	metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate 3 different prompts that will be given to 3 separate security review agents.
+	// Use dynamic prompt generation only if explicitly enabled (opt-in)
+	// Default: use static prompts for token savings and consistency
+	if g.useDynamicPrompts {
+		// Generate prompts dynamically using the LLM
+		metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate 3 different prompts that will be given to 3 separate security review agents.
 
 Each prompt should instruct the agent to independently review a subsystem for security vulnerabilities.
 
@@ -79,33 +95,28 @@ Output format - use exactly this format with the markers:
 ---END---
 `, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions, subsystem.Name, subsystem.Paths)
 
-	output, err := agent.RunAndCollect(g.agent, metaPrompt)
-	if err != nil {
-		// Fall back to static prompts
-		return g.staticPrompts(plan, subsystem), nil
+		output, err := agent.RunAndCollect(g.agent, metaPrompt)
+		if err == nil {
+			prompts := parsePrompts(output)
+			if len(prompts) >= 3 {
+				return prompts[:3], nil
+			}
+		}
+		// Fall through to static prompts if dynamic generation failed
 	}
 
-	prompts := parsePrompts(output)
-	if len(prompts) < 3 {
-		// Fall back to static prompts
-		return g.staticPrompts(plan, subsystem), nil
-	}
-
-	return prompts[:3], nil
+	// Use static prompts (default, or fallback from dynamic)
+	return g.staticPrompts(plan, subsystem, generalContext, subsystemContext), nil
 }
 
-func (g *PromptGenerator) staticPrompts(plan *state.Plan, subsystem *state.Subsystem) []string {
-	// Build context section
+func (g *PromptGenerator) staticPrompts(plan *state.Plan, subsystem *state.Subsystem, generalContext, subsystemContext string) []string {
+	// Build context section (using cached context passed as parameters)
 	contextSection := ""
-	if g.context != nil {
-		// Add general context
-		if general := g.context.ForPrompt(); general != "" {
-			contextSection += "\n" + general + "\n"
-		}
-		// Add subsystem-specific context
-		if specific := g.context.ForSubsystemPrompt(subsystem.Slug); specific != "" {
-			contextSection += "\n" + specific + "\n"
-		}
+	if generalContext != "" {
+		contextSection += "\n" + generalContext + "\n"
+	}
+	if subsystemContext != "" {
+		contextSection += "\n" + subsystemContext + "\n"
 	}
 
 	prompt := fmt.Sprintf(`You are a senior security researcher conducting a thorough security review.
