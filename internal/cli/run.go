@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
@@ -21,7 +22,8 @@ import (
 )
 
 var (
-	useWeb bool
+	useWeb     bool
+	createGist bool
 )
 
 var runCmd = &cobra.Command{
@@ -40,6 +42,7 @@ This is equivalent to running: plan → assess → convene → complete`,
 
 func init() {
 	runCmd.Flags().BoolVar(&useWeb, "web", false, "Open web dashboard for monitoring")
+	runCmd.Flags().BoolVar(&createGist, "gist", false, "Create a secret gist of the final report")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -264,6 +267,18 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintSuccess("Subsystem: %s", subsystem.Name)
 	display.PrintSuccess("Results: %s", resultPath)
 
+	// Create gist if requested
+	if createGist {
+		fmt.Println()
+		display.PrintStatus("Creating secret gist...")
+		gistURL, err := createSecretGist(resultPath, subsystem.Name)
+		if err != nil {
+			display.PrintError("Failed to create gist: %v", err)
+		} else {
+			display.PrintSuccess("Gist: %s", gistURL)
+		}
+	}
+
 	// Keep web server running if dashboard is open
 	if useWeb {
 		fmt.Println()
@@ -272,6 +287,23 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func createSecretGist(filePath, subsystemName string) (string, error) {
+	// Use gh gist create to make a secret gist
+	cmd := exec.Command("gh", "gist", "create", "--secret", "--desc",
+		fmt.Sprintf("Conclave Security Audit: %s", subsystemName),
+		filePath)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("gh command failed: %w\nOutput: %s", err, string(output))
+	}
+
+	// The output should be the gist URL, trim whitespace
+	gistURL := strings.TrimSpace(string(output))
+
+	return gistURL, nil
 }
 
 func openBrowser(url string) {
