@@ -290,8 +290,8 @@ func runFull(cmd *cobra.Command, args []string) error {
 }
 
 func createSecretGist(filePath, subsystemName string) (string, error) {
-	// Use gh gist create to make a secret gist
-	cmd := exec.Command("gh", "gist", "create", "--secret", "--desc",
+	// Use gh gist create (creates secret gists by default)
+	cmd := exec.Command("gh", "gist", "create", "--desc",
 		fmt.Sprintf("Conclave Security Audit: %s", subsystemName),
 		filePath)
 
