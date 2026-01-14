@@ -41,6 +41,7 @@ func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 
 		// gemini -y (yolo mode) with prompt via stdin
 		// Run through login shell to pick up user's PATH from shell profile
+		// TODO: Check if Gemini CLI has sandbox flags like Codex does
 		geminiArgs := "gemini -y"
 		if a.model != "" {
 			geminiArgs += " --model " + a.model

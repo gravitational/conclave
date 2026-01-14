@@ -39,9 +39,9 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		defer close(output)
 		defer close(errCh)
 
-		// codex exec --full-auto with prompt via stdin (using "-" to read from stdin)
+		// codex exec with sandboxed mode - restricts writes to workspace, /tmp, $TMPDIR
 		// Run through login shell to pick up user's PATH from shell profile
-		codexArgs := "codex exec --full-auto"
+		codexArgs := "codex exec --sandbox workspace-write"
 		if a.model != "" {
 			codexArgs += " --model " + a.model
 		}
