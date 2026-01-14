@@ -150,19 +150,18 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 	}
 
 	// Check for errors
-	if agentError := <-agentErr; agentError != nil {
-		return false, outputBuilder.String(), agentError
-	}
-
-	if rateLimitDetected {
-		return false, outputBuilder.String(), fmt.Errorf("rate limit detected")
-	}
-
-	// Check if output seems truncated/incomplete (heuristic)
+	agentError := <-agentErr
 	finalOutput := outputBuilder.String()
-	if len(finalOutput) < 50 && !strings.Contains(finalOutput, "no ") {
-		// Very short output might indicate a problem
-		// But don't fail on intentionally short responses
+
+	if agentError != nil {
+		return false, finalOutput, agentError
+	}
+
+	// Only trigger rate limit failover if the output is very short
+	// If we got substantial output and command succeeded, ignore rate limit
+	// keywords that may appear in the content (e.g., code snippets being analyzed)
+	if rateLimitDetected && len(finalOutput) < 500 {
+		return false, finalOutput, fmt.Errorf("rate limit detected")
 	}
 
 	return true, finalOutput, nil
