@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Conclave Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -67,14 +70,12 @@
 
         .status-dot.connected { background: #3fb950; }
 
-        /* 3-column layout */
         .container {
             display: grid;
             grid-template-columns: 260px 1fr 240px;
             height: calc(100vh - 49px);
         }
 
-        /* Timeline Panel (left) */
         .timeline-panel {
             background: #161b22;
             border-right: 1px solid #30363d;
@@ -178,28 +179,12 @@
             font-size: 12px;
         }
 
-        /* Active Phase Area (center) */
         .active-phase-area {
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
-        .phase-header {
-            padding: 10px 16px;
-            background: #161b22;
-            border-bottom: 1px solid #30363d;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .phase-header .phase-description {
-            font-size: 13px;
-            color: #8b949e;
-        }
-
-        /* Split panels */
         .agent-panels {
             flex: 1;
             display: grid;
@@ -259,16 +244,17 @@
 
         .agent-panel-content {
             flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 12px;
-            line-height: 1.6;
+            overflow: hidden;
+            position: relative;
         }
 
-        .agent-panel-content .log-line {
-            margin-bottom: 2px;
-            word-break: break-word;
+        .agent-panel-content .xterm {
+            height: 100%;
+            padding: 8px;
+        }
+
+        .agent-panel-content .xterm-viewport {
+            overflow-y: auto !important;
         }
 
         .panels-empty-state {
@@ -281,7 +267,6 @@
             background: #0d1117;
         }
 
-        /* Agent Sidebar (right) */
         .agent-sidebar {
             background: #161b22;
             border-left: 1px solid #30363d;
@@ -374,7 +359,6 @@
             color: #8b949e;
         }
 
-        /* Buttons */
         .kill-btn {
             background: #da3633;
             border: none;
@@ -412,7 +396,6 @@
             font-size: 12px;
         }
 
-        /* Markdown styling */
         .markdown-content {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 13px;
@@ -469,7 +452,6 @@
 
         .markdown-content strong { color: #f0f6fc; }
 
-        /* Toast notifications */
         .toast {
             position: fixed;
             bottom: 20px;
@@ -505,7 +487,6 @@
     </div>
 
     <div class="container">
-        <!-- Timeline Panel (left) -->
         <aside class="timeline-panel">
             <div class="timeline-header">Audit Progress</div>
             <div class="timeline-content" id="timeline-content">
@@ -513,14 +494,12 @@
             </div>
         </aside>
 
-        <!-- Active Phase Area (center) -->
         <main class="active-phase-area">
             <div class="agent-panels" id="agent-panels">
                 <div class="panels-empty-state">Waiting for agents...</div>
             </div>
         </main>
 
-        <!-- Agent Sidebar (right) -->
         <aside class="agent-sidebar">
             <div class="sidebar-header">
                 <span>Agents</span>
@@ -532,25 +511,16 @@
     </div>
 
     <script>
-        // Connection state
         let ws;
-
-        // Phase tracking
         let currentPhase = null;
         let currentPhaseDesc = '';
-
-        // Historical data (preserved across phase changes)
         let phaseHistory = [];
-
-        // Current phase data (cleared on phase change)
         let currentAgents = {};
         let currentAgentLogs = {};
-
-        // UI state
-        let autoScroll = true;
+        let terminals = {}; // xterm instances per agent
+        let fitAddons = {}; // fit addons per agent
         let expandedTimelinePhases = new Set();
 
-        // Configure marked
         marked.setOptions({
             breaks: true,
             gfm: true
@@ -601,20 +571,20 @@
             currentPhase = data.phase;
             currentPhaseDesc = data.description;
 
-            // Clear current state for new phase
+            // Dispose old terminals
+            Object.values(terminals).forEach(term => term.dispose());
+            terminals = {};
+            fitAddons = {};
+
             currentAgents = {};
             currentAgentLogs = {};
 
-            // Update header
             updatePhaseDisplay();
-
-            // Re-render
             renderActivePhase();
             renderAgentSidebar();
         }
 
         function handlePhaseComplete(data) {
-            // Add to history (avoid duplicates)
             const exists = phaseHistory.some(p =>
                 p.phase === data.phase &&
                 p.startTime === data.startTime
@@ -636,23 +606,13 @@
 
         function updateAgent(data) {
             const id = String(data.id);
-            const prevAgent = currentAgents[id];
             currentAgents[id] = data;
 
-            // Check if we need to create/update panels
-            const panelExists = document.getElementById(`panel-content-${id}`);
-
-            if (!panelExists) {
-                // New agent - need to rebuild panels
+            const terminalExists = terminals[id];
+            if (!terminalExists) {
                 renderActivePhase();
             } else {
-                // Update existing panel header
                 updatePanelHeader(id, data);
-
-                // If agent just finished, render markdown
-                if (prevAgent && prevAgent.state === 'running' && data.state === 'done') {
-                    renderPanelContent(id);
-                }
             }
 
             renderAgentSidebar();
@@ -661,14 +621,16 @@
         function addLog(data) {
             const agentId = String(data.agentId);
 
-            // Accumulate logs
             if (!currentAgentLogs[agentId]) {
                 currentAgentLogs[agentId] = [];
             }
             currentAgentLogs[agentId].push(data.line);
 
-            // Append to panel
-            appendToPanel(agentId, data.line);
+            // Write directly to terminal
+            const term = terminals[agentId];
+            if (term) {
+                term.writeln(data.line);
+            }
         }
 
         function updatePanelHeader(id, agent) {
@@ -689,16 +651,59 @@
             `;
         }
 
-        function renderPanelContent(id) {
-            const contentEl = document.getElementById(`panel-content-${id}`);
-            if (!contentEl) return;
+        function createTerminal(containerId, agentId) {
+            const container = document.getElementById(containerId);
+            if (!container) return null;
 
-            const logs = currentAgentLogs[id] || [];
-            const agent = currentAgents[id];
+            const term = new Terminal({
+                theme: {
+                    background: '#0d1117',
+                    foreground: '#c9d1d9',
+                    cursor: '#c9d1d9',
+                    cursorAccent: '#0d1117',
+                    selection: 'rgba(56, 139, 253, 0.3)',
+                    black: '#484f58',
+                    red: '#ff7b72',
+                    green: '#3fb950',
+                    yellow: '#d29922',
+                    blue: '#58a6ff',
+                    magenta: '#bc8cff',
+                    cyan: '#39c5cf',
+                    white: '#b1bac4',
+                    brightBlack: '#6e7681',
+                    brightRed: '#ffa198',
+                    brightGreen: '#56d364',
+                    brightYellow: '#e3b341',
+                    brightBlue: '#79c0ff',
+                    brightMagenta: '#d2a8ff',
+                    brightCyan: '#56d4dd',
+                    brightWhite: '#f0f6fc',
+                },
+                fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+                fontSize: 12,
+                lineHeight: 1.4,
+                scrollback: 10000,
+                cursorBlink: false,
+                cursorStyle: 'underline',
+                disableStdin: true,
+                convertEol: true,
+            });
 
-            if (logs.length > 0 && agent && agent.state === 'done') {
-                contentEl.innerHTML = `<div class="markdown-content">${renderMarkdown(logs.join('\n'))}</div>`;
-            }
+            const fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(container);
+
+            // Fit after a small delay to ensure container is sized
+            setTimeout(() => {
+                try {
+                    fitAddon.fit();
+                } catch (e) {}
+            }, 50);
+
+            terminals[agentId] = term;
+            fitAddons[agentId] = fitAddon;
+
+            return term;
         }
 
         function renderActivePhase() {
@@ -711,7 +716,6 @@
                 return;
             }
 
-            // Set column count
             container.className = 'agent-panels';
             if (agentIds.length === 1) {
                 container.classList.add('single-agent');
@@ -735,51 +739,19 @@
                             <span class="agent-stats">${agent.lines} lines</span>
                             <button class="kill-btn" onclick="killAgent(${id})" ${agent.state === 'running' ? '' : 'disabled'}>Kill</button>
                         </div>
-                        <div class="agent-panel-content" id="panel-content-${id}"></div>
+                        <div class="agent-panel-content" id="terminal-${id}"></div>
                     </div>
                 `;
             }).join('');
 
-            // Populate panels with accumulated logs
+            // Create terminals and populate with existing logs
             agentIds.forEach(id => {
-                const logs = currentAgentLogs[id] || [];
-                const contentEl = document.getElementById(`panel-content-${id}`);
-                if (contentEl && logs.length > 0) {
-                    const agent = currentAgents[id];
-                    if (agent.state === 'done') {
-                        contentEl.innerHTML = `<div class="markdown-content">${renderMarkdown(logs.join('\n'))}</div>`;
-                    } else {
-                        contentEl.innerHTML = logs.map(line =>
-                            `<div class="log-line">${escapeHtml(line)}</div>`
-                        ).join('');
-                    }
-
-                    if (autoScroll) {
-                        requestAnimationFrame(() => {
-                            contentEl.scrollTop = contentEl.scrollHeight;
-                        });
-                    }
+                const term = createTerminal(`terminal-${id}`, id);
+                if (term) {
+                    const logs = currentAgentLogs[id] || [];
+                    logs.forEach(line => term.writeln(line));
                 }
             });
-        }
-
-        function appendToPanel(agentId, line) {
-            const contentEl = document.getElementById(`panel-content-${agentId}`);
-            if (!contentEl) return;
-
-            const agent = currentAgents[agentId];
-            if (!agent || agent.state !== 'running') return;
-
-            const lineEl = document.createElement('div');
-            lineEl.className = 'log-line';
-            lineEl.textContent = line;
-            contentEl.appendChild(lineEl);
-
-            if (autoScroll) {
-                requestAnimationFrame(() => {
-                    contentEl.scrollTop = contentEl.scrollHeight;
-                });
-            }
         }
 
         function renderAgentSidebar() {
@@ -794,7 +766,6 @@
             container.innerHTML = agentIds.map(id => {
                 const agent = currentAgents[id];
                 const elapsed = formatDuration(agent.startTime, agent.endTime);
-                const canKill = agent.state === 'running' || agent.state === 'waiting';
                 const providerClass = agent.provider.toLowerCase();
                 const displayModel = agent.model || agent.provider;
 
@@ -941,12 +912,20 @@
             return div.innerHTML;
         }
 
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            Object.entries(fitAddons).forEach(([id, addon]) => {
+                try {
+                    addon.fit();
+                } catch (e) {}
+            });
+        });
+
         // Update durations every second
         setInterval(() => {
             renderAgentSidebar();
         }, 1000);
 
-        // Connect on load
         connect();
     </script>
 </body>
