@@ -11,12 +11,13 @@ import (
 
 // ClaudeAgent implements Agent using the Claude CLI
 type ClaudeAgent struct {
-	model string
+	model   string
+	verbose bool
 }
 
 // NewClaudeAgent creates a new Claude agent with optional model
-func NewClaudeAgent(model string) *ClaudeAgent {
-	return &ClaudeAgent{model: model}
+func NewClaudeAgent(model string, verbose bool) *ClaudeAgent {
+	return &ClaudeAgent{model: model, verbose: verbose}
 }
 
 // Name returns the agent type name
@@ -76,8 +77,10 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 				stderrMu.Lock()
 				stderrLines = append(stderrLines, line)
 				stderrMu.Unlock()
-				// Output stderr with prefix for visibility
-				output <- "[stderr] " + line
+				// Output stderr with prefix - filter to errors only unless verbose
+				if a.verbose || looksLikeError(line) {
+					output <- "[stderr] " + line
+				}
 			}
 		}()
 

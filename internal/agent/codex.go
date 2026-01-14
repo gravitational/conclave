@@ -11,12 +11,13 @@ import (
 
 // CodexAgent implements Agent using the Codex CLI
 type CodexAgent struct {
-	model string
+	model   string
+	verbose bool
 }
 
 // NewCodexAgent creates a new Codex agent with optional model
-func NewCodexAgent(model string) *CodexAgent {
-	return &CodexAgent{model: model}
+func NewCodexAgent(model string, verbose bool) *CodexAgent {
+	return &CodexAgent{model: model, verbose: verbose}
 }
 
 // Name returns the agent type name
@@ -79,8 +80,10 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 				stderrMu.Lock()
 				stderrLines = append(stderrLines, line)
 				stderrMu.Unlock()
-				// Output stderr with prefix for visibility
-				output <- "[stderr] " + line
+				// Output stderr with prefix - filter to errors only unless verbose
+				if a.verbose || looksLikeError(line) {
+					output <- "[stderr] " + line
+				}
 			}
 		}()
 

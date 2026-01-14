@@ -14,6 +14,7 @@ var (
 	claudeModel string
 	geminiModel string
 	codexModel  string
+	verbose     bool
 )
 
 var rootCmd = &cobra.Command{
@@ -39,6 +40,9 @@ func init() {
 	rootCmd.PersistentFlags().Lookup("claude").NoOptDefVal = "default"
 	rootCmd.PersistentFlags().Lookup("gemini").NoOptDefVal = "default"
 	rootCmd.PersistentFlags().Lookup("codex").NoOptDefVal = "default"
+
+	// Verbose flag for showing all stderr output
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show all stderr output from agents (default: only errors)")
 }
 
 func Execute() error {
@@ -136,11 +140,11 @@ func CreateResilientAgent() agent.Agent {
 func createAgentByName(name, model string) agent.Agent {
 	switch name {
 	case "claude":
-		return agent.NewClaudeAgent(model)
+		return agent.NewClaudeAgent(model, verbose)
 	case "gemini":
-		return agent.NewGeminiAgent(model)
+		return agent.NewGeminiAgent(model, verbose)
 	default:
-		return agent.NewCodexAgent(model)
+		return agent.NewCodexAgent(model, verbose)
 	}
 }
 

@@ -11,12 +11,13 @@ import (
 
 // GeminiAgent implements Agent using the Gemini CLI
 type GeminiAgent struct {
-	model string
+	model   string
+	verbose bool
 }
 
 // NewGeminiAgent creates a new Gemini agent with optional model
-func NewGeminiAgent(model string) *GeminiAgent {
-	return &GeminiAgent{model: model}
+func NewGeminiAgent(model string, verbose bool) *GeminiAgent {
+	return &GeminiAgent{model: model, verbose: verbose}
 }
 
 // Name returns the agent type name
@@ -78,8 +79,10 @@ func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 				stderrMu.Lock()
 				stderrLines = append(stderrLines, line)
 				stderrMu.Unlock()
-				// Output stderr with prefix for visibility
-				output <- "[stderr] " + line
+				// Output stderr with prefix - filter to errors only unless verbose
+				if a.verbose || looksLikeError(line) {
+					output <- "[stderr] " + line
+				}
 			}
 		}()
 
