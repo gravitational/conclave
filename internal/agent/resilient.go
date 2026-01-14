@@ -125,31 +125,15 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 	agentOutput, agentErr := agent.Run(ctx, prompt)
 
 	var outputBuilder strings.Builder
-	rateLimitDetected := false
 
-	// Stream output and watch for rate limit indicators in stderr only
+	// Stream output
 	for line := range agentOutput {
 		outputBuilder.WriteString(line)
 		outputBuilder.WriteString("\n")
-
-		// Only check for rate limit indicators in stderr output (prefixed with [stderr])
-		// This avoids false positives when agents mention "rate limit" in their response text
-		if strings.HasPrefix(line, "[stderr]") {
-			lowerLine := strings.ToLower(line)
-			if strings.Contains(lowerLine, "rate limit") ||
-				strings.Contains(lowerLine, "rate_limit") ||
-				strings.Contains(lowerLine, "too many requests") ||
-				strings.Contains(lowerLine, "429") ||
-				strings.Contains(lowerLine, "quota exceeded") ||
-				strings.Contains(lowerLine, "capacity") {
-				rateLimitDetected = true
-			}
-		}
-
 		output <- line
 	}
 
-	// Check for errors
+	// Check exit status - trust the CLI's exit code
 	agentError := <-agentErr
 	finalOutput := outputBuilder.String()
 
@@ -157,13 +141,7 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 		return false, finalOutput, agentError
 	}
 
-	// Only trigger rate limit failover if the output is very short
-	// If we got substantial output and command succeeded, ignore rate limit
-	// keywords that may appear in the content (e.g., code snippets being analyzed)
-	if rateLimitDetected && len(finalOutput) < 500 {
-		return false, finalOutput, fmt.Errorf("rate limit detected")
-	}
-
+	// Command succeeded - trust it
 	return true, finalOutput, nil
 }
 
