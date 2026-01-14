@@ -81,8 +81,8 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 				stderrMu.Lock()
 				stderrLines = append(stderrLines, line)
 				stderrMu.Unlock()
-				// Output stderr with prefix - filter to errors only unless verbose
-				if a.verbose || looksLikeError(line) {
+				// Only show stderr in verbose mode; otherwise just collect for error reporting
+				if a.verbose {
 					output <- "[stderr] " + line
 				}
 			}
