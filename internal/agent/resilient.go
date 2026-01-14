@@ -127,20 +127,23 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 	var outputBuilder strings.Builder
 	rateLimitDetected := false
 
-	// Stream output and watch for rate limit indicators
+	// Stream output and watch for rate limit indicators in stderr only
 	for line := range agentOutput {
 		outputBuilder.WriteString(line)
 		outputBuilder.WriteString("\n")
 
-		// Check for rate limit indicators
-		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, "rate limit") ||
-			strings.Contains(lowerLine, "rate_limit") ||
-			strings.Contains(lowerLine, "too many requests") ||
-			strings.Contains(lowerLine, "429") ||
-			strings.Contains(lowerLine, "quota exceeded") ||
-			strings.Contains(lowerLine, "capacity") {
-			rateLimitDetected = true
+		// Only check for rate limit indicators in stderr output (prefixed with [stderr])
+		// This avoids false positives when agents mention "rate limit" in their response text
+		if strings.HasPrefix(line, "[stderr]") {
+			lowerLine := strings.ToLower(line)
+			if strings.Contains(lowerLine, "rate limit") ||
+				strings.Contains(lowerLine, "rate_limit") ||
+				strings.Contains(lowerLine, "too many requests") ||
+				strings.Contains(lowerLine, "429") ||
+				strings.Contains(lowerLine, "quota exceeded") ||
+				strings.Contains(lowerLine, "capacity") {
+				rateLimitDetected = true
+			}
 		}
 
 		output <- line

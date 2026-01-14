@@ -3,7 +3,10 @@ package agent
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os/exec"
+	"strings"
+	"sync"
 )
 
 // ClaudeAgent implements Agent using the Claude CLI
@@ -59,20 +62,45 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 			return
 		}
 
+		// Collect stderr in background for error reporting
+		var stderrLines []string
+		var stderrMu sync.Mutex
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			stderrScanner := bufio.NewScanner(stderr)
+			for stderrScanner.Scan() {
+				line := stderrScanner.Text()
+				stderrMu.Lock()
+				stderrLines = append(stderrLines, line)
+				stderrMu.Unlock()
+				// Output stderr with prefix for visibility
+				output <- "[stderr] " + line
+			}
+		}()
+
 		// Stream stdout
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			output <- scanner.Text()
 		}
 
-		// Also capture stderr
-		stderrScanner := bufio.NewScanner(stderr)
-		for stderrScanner.Scan() {
-			output <- stderrScanner.Text()
-		}
+		// Wait for stderr collection to complete
+		wg.Wait()
 
 		if err := cmd.Wait(); err != nil {
-			errCh <- err
+			// Include stderr content in error for better diagnostics
+			stderrMu.Lock()
+			stderrContent := strings.Join(stderrLines, "\n")
+			stderrMu.Unlock()
+
+			if stderrContent != "" {
+				errCh <- fmt.Errorf("%w\n[claude stderr]:\n%s", err, stderrContent)
+			} else {
+				errCh <- err
+			}
 			return
 		}
 
