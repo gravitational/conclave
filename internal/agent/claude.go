@@ -39,12 +39,14 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		defer close(output)
 		defer close(errCh)
 
-		args := []string{"-p", prompt}
+		// Run through login shell to pick up user's PATH from shell profile
+		claudeArgs := "claude"
 		if a.model != "" {
-			args = append([]string{"--model", a.model}, args...)
+			claudeArgs += " --model " + a.model
 		}
+		claudeArgs += " -p " + shellQuote(prompt)
 
-		cmd := exec.CommandContext(ctx, "claude", args...)
+		cmd := exec.CommandContext(ctx, "sh", "-lc", claudeArgs)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {

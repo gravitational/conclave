@@ -40,13 +40,14 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		defer close(errCh)
 
 		// codex exec --full-auto with prompt via stdin (using "-" to read from stdin)
-		args := []string{"exec", "--full-auto"}
+		// Run through login shell to pick up user's PATH from shell profile
+		codexArgs := "codex exec --full-auto"
 		if a.model != "" {
-			args = append(args, "--model", a.model)
+			codexArgs += " --model " + a.model
 		}
-		args = append(args, "-")
+		codexArgs += " -"
 
-		cmd := exec.CommandContext(ctx, "codex", args...)
+		cmd := exec.CommandContext(ctx, "sh", "-lc", codexArgs)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()

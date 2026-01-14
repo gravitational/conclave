@@ -40,12 +40,13 @@ func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		defer close(errCh)
 
 		// gemini -y (yolo mode) with prompt via stdin
-		args := []string{"-y"}
+		// Run through login shell to pick up user's PATH from shell profile
+		geminiArgs := "gemini -y"
 		if a.model != "" {
-			args = append(args, "--model", a.model)
+			geminiArgs += " --model " + a.model
 		}
 
-		cmd := exec.CommandContext(ctx, "gemini", args...)
+		cmd := exec.CommandContext(ctx, "sh", "-lc", geminiArgs)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()
