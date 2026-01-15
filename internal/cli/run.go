@@ -21,6 +21,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// toDebateRounds converts agent results to debate rounds
+func toDebateRounds(results []agent.AgentResult) []convene.DebateRound {
+	rounds := make([]convene.DebateRound, len(results))
+	for i, r := range results {
+		rounds[i] = convene.DebateRound{
+			AgentNum: i + 1,
+			Provider: r.Agent.Provider,
+			Model:    r.Agent.Model,
+			Content:  r.Content,
+		}
+	}
+	return rounds
+}
+
+// toPerspectives converts agent results to perspectives
+func toPerspectives(results []agent.AgentResult) []state.Perspective {
+	perspectives := make([]state.Perspective, len(results))
+	for i, r := range results {
+		perspectives[i] = state.Perspective{
+			AgentNum: i + 1,
+			Agent:    state.AgentMeta{Provider: r.Agent.Provider, Model: r.Agent.Model},
+			Content:  r.Content,
+		}
+	}
+	return perspectives
+}
+
 var (
 	useWeb     bool
 	createGist bool
@@ -184,16 +211,18 @@ func runFull(cmd *cobra.Command, args []string) error {
 	// Run 3 assessment agents
 	assessAgents := DistributeAgents(3)
 	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
-	var perspectives []string
+	var assessResults []agent.AgentResult
 	if hub != nil {
-		perspectives = agent.StreamMultipleWithWeb(assessAgents, prompts, names, hub)
+		assessResults = agent.StreamMultipleWithWeb(assessAgents, prompts, names, hub)
 	} else {
-		perspectives = agent.StreamMultipleWithStatus(assessAgents, prompts, names)
+		assessResults = agent.StreamMultipleWithStatus(assessAgents, prompts, names)
 	}
 
-	// Save perspectives
-	for i, content := range perspectives {
-		st.SavePerspective(p.ID, subsystem.Slug, i+1, content)
+	// Convert to perspectives and save with agent metadata
+	perspectives := toPerspectives(assessResults)
+	for i, result := range assessResults {
+		agentMeta := state.AgentMeta{Provider: result.Agent.Provider, Model: result.Agent.Model}
+		st.SavePerspective(p.ID, subsystem.Slug, i+1, agentMeta, result.Content)
 	}
 	fmt.Println()
 	display.PrintSuccess("Assessment complete")
@@ -215,12 +244,13 @@ func runFull(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	round1Prompts := debate.Round1Prompts(perspectives)
 	debateAgents := DistributeAgents(3)
-	var round1 []string
+	var round1Results []agent.AgentResult
 	if hub != nil {
-		round1 = agent.StreamMultipleWithWeb(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
+		round1Results = agent.StreamMultipleWithWeb(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
 	} else {
-		round1 = agent.StreamMultipleWithStatus(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+		round1Results = agent.StreamMultipleWithStatus(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
 	}
+	round1 := toDebateRounds(round1Results)
 	fmt.Println()
 
 	// Round 2: Respond to each other
@@ -231,17 +261,18 @@ func runFull(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	round2Prompts := debate.Round2Prompts(perspectives, round1)
 	debateAgents2 := DistributeAgents(3)
-	var round2 []string
+	var round2Results []agent.AgentResult
 	if hub != nil {
-		round2 = agent.StreamMultipleWithWeb(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
+		round2Results = agent.StreamMultipleWithWeb(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
 	} else {
-		round2 = agent.StreamMultipleWithStatus(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+		round2Results = agent.StreamMultipleWithStatus(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
 	}
+	round2 := toDebateRounds(round2Results)
 	fmt.Println()
 
 	// Save debate rounds
-	for i, content := range round1 {
-		st.SaveDebate(p.ID, subsystem.Slug, i+1, content)
+	for i, r := range round1 {
+		st.SaveDebate(p.ID, subsystem.Slug, i+1, r.Content)
 	}
 
 	// Final: Synthesize into report

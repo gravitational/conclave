@@ -38,6 +38,37 @@ type Subsystem struct {
 	Interactions string `yaml:"interactions"`
 }
 
+// AgentMeta captures the agent that produced a piece of content
+type AgentMeta struct {
+	Provider string `yaml:"provider"`        // "codex", "claude", "gemini"
+	Model    string `yaml:"model,omitempty"` // e.g., "o3", "sonnet", "gemini-2.5-pro"
+}
+
+// Perspective represents a single agent's assessment of a subsystem
+type Perspective struct {
+	AgentNum int       `yaml:"agent_num"`
+	Agent    AgentMeta `yaml:"agent"`
+	Content  string    `yaml:"-"` // Stored in body, not frontmatter
+}
+
+// FormatLabel returns a human-readable label like "Agent 1 (Claude/sonnet)"
+func (p *Perspective) FormatLabel() string {
+	if p.Agent.Model != "" {
+		return fmt.Sprintf("Agent %d (%s/%s)", p.AgentNum, capitalize(p.Agent.Provider), p.Agent.Model)
+	}
+	if p.Agent.Provider != "" && p.Agent.Provider != "unknown" {
+		return fmt.Sprintf("Agent %d (%s)", p.AgentNum, capitalize(p.Agent.Provider))
+	}
+	return fmt.Sprintf("Agent %d", p.AgentNum)
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // Slug returns a URL-safe version of the plan name
 func (p *Plan) Slug() string {
 	slug := strings.ToLower(p.Name)
@@ -291,15 +322,38 @@ func GenerateID() string {
 	return uuid.New().String()
 }
 
-// SavePerspective saves an agent perspective
-func (s *State) SavePerspective(planID, subsystem string, agentNum int, content string) (string, error) {
+// SavePerspective saves an agent perspective with metadata
+func (s *State) SavePerspective(planID, subsystem string, agentNum int, agent AgentMeta, content string) (string, error) {
 	dir := filepath.Join(s.dir, "assessments", planID[:8], subsystem)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
 
+	// Build frontmatter
+	frontmatter := struct {
+		AgentNum int    `yaml:"agent_num"`
+		Provider string `yaml:"provider"`
+		Model    string `yaml:"model,omitempty"`
+	}{
+		AgentNum: agentNum,
+		Provider: agent.Provider,
+		Model:    agent.Model,
+	}
+
+	fm, err := yaml.Marshal(frontmatter)
+	if err != nil {
+		return "", err
+	}
+
+	// Build content with frontmatter
+	var output strings.Builder
+	output.WriteString("---\n")
+	output.Write(fm)
+	output.WriteString("---\n\n")
+	output.WriteString(content)
+
 	path := filepath.Join(dir, fmt.Sprintf("agent-%d.md", agentNum))
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(output.String()), 0644); err != nil {
 		return "", err
 	}
 
@@ -307,7 +361,7 @@ func (s *State) SavePerspective(planID, subsystem string, agentNum int, content 
 }
 
 // LoadPerspectives loads all perspectives for a subsystem
-func (s *State) LoadPerspectives(planID, subsystem string) ([]string, error) {
+func (s *State) LoadPerspectives(planID, subsystem string) ([]Perspective, error) {
 	dir := filepath.Join(s.dir, "assessments", planID[:8], subsystem)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -317,18 +371,59 @@ func (s *State) LoadPerspectives(planID, subsystem string) ([]string, error) {
 		return nil, err
 	}
 
-	var perspectives []string
+	var perspectives []Perspective
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
+
 		path := filepath.Join(dir, entry.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		perspectives = append(perspectives, string(data))
+
+		content := string(data)
+		p := Perspective{}
+
+		// Parse frontmatter if present (backwards compatibility)
+		if strings.HasPrefix(content, "---\n") {
+			endIdx := strings.Index(content[4:], "\n---\n")
+			if endIdx != -1 {
+				fmContent := content[4 : 4+endIdx]
+				// Parse frontmatter into struct
+				var fm struct {
+					AgentNum int    `yaml:"agent_num"`
+					Provider string `yaml:"provider"`
+					Model    string `yaml:"model"`
+				}
+				if err := yaml.Unmarshal([]byte(fmContent), &fm); err == nil {
+					p.AgentNum = fm.AgentNum
+					p.Agent = AgentMeta{Provider: fm.Provider, Model: fm.Model}
+				}
+				p.Content = strings.TrimPrefix(content[4+endIdx+5:], "\n")
+			} else {
+				p.Content = content // No valid frontmatter
+			}
+		} else {
+			// Legacy file without frontmatter
+			p.Content = content
+			// Extract agent number from filename (agent-1.md -> 1)
+			name := entry.Name()
+			if len(name) > 9 && strings.HasPrefix(name, "agent-") {
+				numStr := name[6 : len(name)-3]
+				fmt.Sscanf(numStr, "%d", &p.AgentNum)
+			}
+			p.Agent = AgentMeta{Provider: "unknown"}
+		}
+
+		perspectives = append(perspectives, p)
 	}
+
+	// Sort by agent number
+	sort.Slice(perspectives, func(i, j int) bool {
+		return perspectives[i].AgentNum < perspectives[j].AgentNum
+	})
 
 	return perspectives, nil
 }

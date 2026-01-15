@@ -117,17 +117,25 @@ func generateSynthesisPrompt(p *state.Plan, subsystem *state.Subsystem, debates 
 
 	prompt += `## Your Task
 
-Review all the debate outputs above and synthesize them into a final security report. Focus on:
+Review all the debate outputs above and synthesize them into a final security report with the following sections:
 
-1. **Critical Findings** - Issues that are clearly exploitable and high-impact
-2. **Likely Vulnerabilities** - Issues that appear exploitable given the codebase context
-3. **Areas of Concern** - Patterns that warrant further investigation
+1. **Confirmed Vulnerabilities** - Issues the reviewers agreed are real and exploitable
+   - Include severity, specific code locations, and exploitation details
+   - For each finding, note which debaters identified it (e.g., "Found by: Debater 1, Debater 2")
 
-For each finding, provide:
-- A clear description of the vulnerability
-- The specific location(s) in the code
-- Potential impact and exploitability
-- Recommended remediation
+2. **Disputed/Unclear** - Issues where debaters disagreed
+   - Note the disagreement (e.g., "Debater 1 found this; Debater 3 disputed")
+   - Include the reasoning from both sides
+
+3. **Dismissed** - Issues determined to be false positives or non-exploitable
+   - Note which debater(s) initially raised them and why they were dismissed
+
+4. **Agent Comparison Summary**
+   - Briefly summarize each debater's approach and key findings
+   - Note any patterns in what each debater focused on
+   - Highlight areas of agreement and disagreement
+
+5. **Recommendations** - Prioritized remediation steps
 
 Prioritize quality over quantity. Only include findings that have strong evidence and are actionable.
 Do NOT include theoretical issues or best-practice violations unless they represent real security risks.`

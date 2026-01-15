@@ -82,7 +82,8 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	round1Prompts := debate.Round1Prompts(perspectives)
 	agents1 := DistributeAgents(3)
-	round1 := agent.StreamMultipleWithStatus(agents1, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	round1Results := agent.StreamMultipleWithStatus(agents1, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	round1 := toDebateRounds(round1Results)
 	fmt.Println()
 
 	// Round 2: Respond to each other
@@ -90,12 +91,13 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	round2Prompts := debate.Round2Prompts(perspectives, round1)
 	agents2 := DistributeAgents(3)
-	round2 := agent.StreamMultipleWithStatus(agents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	round2Results := agent.StreamMultipleWithStatus(agents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+	round2 := toDebateRounds(round2Results)
 	fmt.Println()
 
 	// Save debate outputs
-	for i, content := range round1 {
-		st.SaveDebate(p.ID, conveneSubsystem, i+1, content)
+	for i, r := range round1 {
+		st.SaveDebate(p.ID, conveneSubsystem, i+1, r.Content)
 	}
 
 	// Final synthesis

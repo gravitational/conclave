@@ -91,9 +91,13 @@ func runAssess(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	display.PrintSuccess("Assessment complete")
 
-	// Save perspectives
-	for i, content := range results {
-		path, err := st.SavePerspective(p.ID, subsystem.Slug, i+1, content)
+	// Save perspectives with agent metadata
+	for i, result := range results {
+		agentMeta := state.AgentMeta{
+			Provider: result.Agent.Provider,
+			Model:    result.Agent.Model,
+		}
+		path, err := st.SavePerspective(p.ID, subsystem.Slug, i+1, agentMeta, result.Content)
 		if err != nil {
 			display.PrintError("Failed to save perspective %d: %v", i+1, err)
 			continue

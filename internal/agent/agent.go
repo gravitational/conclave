@@ -20,6 +20,27 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
+// AgentMeta captures identity information about an agent
+type AgentMeta struct {
+	Provider string // "codex", "claude", "gemini"
+	Model    string // e.g., "o3", "sonnet", "gemini-2.5-pro"
+}
+
+// GetMeta extracts metadata from an agent
+func GetMeta(ag Agent) AgentMeta {
+	meta := AgentMeta{Provider: ag.Name()}
+	if m, ok := ag.(interface{ Model() string }); ok {
+		meta.Model = m.Model()
+	}
+	return meta
+}
+
+// AgentResult pairs output content with agent metadata
+type AgentResult struct {
+	Content string
+	Agent   AgentMeta
+}
+
 // RunAndCollect runs a prompt and collects all output into a single string
 func RunAndCollect(ag Agent, prompt string) (string, error) {
 	ctx := context.Background()

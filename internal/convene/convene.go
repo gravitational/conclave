@@ -15,6 +15,32 @@ type Debate struct {
 	sub     *state.Subsystem
 }
 
+// DebateRound captures agent output with metadata for debate rounds
+type DebateRound struct {
+	AgentNum int
+	Provider string
+	Model    string
+	Content  string
+}
+
+// FormatLabel returns a human-readable label like "Agent 1 (Claude/sonnet)"
+func (r *DebateRound) FormatLabel() string {
+	if r.Model != "" {
+		return fmt.Sprintf("Agent %d (%s/%s)", r.AgentNum, capitalize(r.Provider), r.Model)
+	}
+	if r.Provider != "" && r.Provider != "unknown" {
+		return fmt.Sprintf("Agent %d (%s)", r.AgentNum, capitalize(r.Provider))
+	}
+	return fmt.Sprintf("Agent %d", r.AgentNum)
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // NewDebate creates a new debate for a subsystem
 func NewDebate(plan *state.Plan, subsystem string) (*Debate, error) {
 	var sub *state.Subsystem
@@ -38,7 +64,7 @@ func (d *Debate) WithContext(ctx *context.RepoContext) *Debate {
 }
 
 // Round1Prompts creates prompts for the first debate round (review initial findings)
-func (d *Debate) Round1Prompts(perspectives []string) []string {
+func (d *Debate) Round1Prompts(perspectives []state.Perspective) []string {
 	base := d.buildBaseContext(perspectives, nil)
 
 	prompt := fmt.Sprintf(`You are a security researcher reviewing initial findings from other researchers.
@@ -51,7 +77,7 @@ Review these findings critically:
 - What did other reviewers miss?
 - How would you prioritize these issues?
 
-Be specific. Reference the actual code and explain your reasoning.
+Be specific. Reference the actual code and explain your reasoning. When referring to other agents' findings, use their labels (e.g., "Agent 1 (Claude)").
 `, base)
 
 	// All agents get same prompt, vary slightly
@@ -64,14 +90,14 @@ Be specific. Reference the actual code and explain your reasoning.
 
 // Round2Prompts creates prompts for the second round (respond to each other)
 // Note: Does not repeat base context from Round 1 to save tokens
-func (d *Debate) Round2Prompts(perspectives []string, round1 []string) []string {
+func (d *Debate) Round2Prompts(perspectives []state.Perspective, round1 []DebateRound) []string {
 	var b strings.Builder
 
 	// Only include the Round 1 discussion, not the full base context
 	// (agents already saw context in Round 1)
 	b.WriteString("## Round 1 Discussion\n")
-	for i, r := range round1 {
-		b.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+	for _, r := range round1 {
+		b.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
 	}
 
 	prompt := fmt.Sprintf(`You are a security researcher in a peer review discussion.
@@ -86,7 +112,7 @@ The debate has begun. Other researchers have shared their views above. Now:
 - Resolve any conflicting assessments
 - Refine the severity ratings based on the discussion
 
-The goal is to converge on the true security issues.
+The goal is to converge on the true security issues. Reference agents by their labels when responding to their points.
 `, b.String())
 
 	return []string{
@@ -98,20 +124,20 @@ The goal is to converge on the true security issues.
 
 // FinalPrompt creates the synthesis prompt (final round, single agent)
 // Note: Does not repeat base context from previous rounds to save tokens
-func (d *Debate) FinalPrompt(perspectives []string, round1, round2 []string) string {
+func (d *Debate) FinalPrompt(perspectives []state.Perspective, round1, round2 []DebateRound) string {
 	// Combine all rounds (without repeating base context)
 	var allDiscussion strings.Builder
 	allDiscussion.WriteString("## Initial Assessments\n")
-	for i, p := range perspectives {
-		allDiscussion.WriteString(fmt.Sprintf("### Assessor %d\n%s\n\n", i+1, p))
+	for _, p := range perspectives {
+		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", p.FormatLabel(), p.Content))
 	}
 	allDiscussion.WriteString("## Debate Round 1\n")
-	for i, r := range round1 {
-		allDiscussion.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+	for _, r := range round1 {
+		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
 	}
 	allDiscussion.WriteString("## Debate Round 2\n")
-	for i, r := range round2 {
-		allDiscussion.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+	for _, r := range round2 {
+		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
 	}
 
 	return fmt.Sprintf(`You are producing the final security report after a thorough peer review.
@@ -121,22 +147,31 @@ Refer to the codebase context and subsystem details provided in previous rounds.
 ## Full Discussion
 %s
 
-Based on this complete discussion, produce the FINAL security report:
+Based on this complete discussion, produce the FINAL security report with the following sections:
 
 1. **Confirmed Vulnerabilities** - Issues the reviewers agreed are real and exploitable
    - Include severity, specific code locations, and exploitation details
+   - For each finding, note which agents identified it (e.g., "Found by: Agent 1 (Claude), Agent 2 (Gemini)")
 
-2. **Disputed/Unclear** - Issues where reviewers disagreed (note the disagreement)
+2. **Disputed/Unclear** - Issues where reviewers disagreed
+   - Note the disagreement (e.g., "Agent 1 (Claude) found this; Agent 3 (Codex) disputed")
+   - Include the reasoning from both sides
 
 3. **Dismissed** - Issues determined to be false positives or non-exploitable
+   - Note which agent(s) initially raised them and why they were dismissed
 
-4. **Recommendations** - Prioritized remediation steps
+4. **Agent Comparison Summary**
+   - Briefly summarize each agent's approach and key findings
+   - Note any patterns (e.g., "Agent 1 (Claude) focused on injection risks, Agent 2 (Gemini) on authorization")
+   - Highlight areas of agreement and disagreement between agents
+
+5. **Recommendations** - Prioritized remediation steps
 
 Be definitive. This is the final report.
 `, allDiscussion.String())
 }
 
-func (d *Debate) buildBaseContext(perspectives []string, priorRound []string) string {
+func (d *Debate) buildBaseContext(perspectives []state.Perspective, priorRound []DebateRound) string {
 	var b strings.Builder
 
 	b.WriteString(fmt.Sprintf(`## Codebase Context
@@ -158,14 +193,14 @@ func (d *Debate) buildBaseContext(perspectives []string, priorRound []string) st
 	}
 
 	b.WriteString("\n## Initial Security Assessments\n")
-	for i, p := range perspectives {
-		b.WriteString(fmt.Sprintf("### Assessor %d\n%s\n\n", i+1, p))
+	for _, p := range perspectives {
+		b.WriteString(fmt.Sprintf("### %s\n%s\n\n", p.FormatLabel(), p.Content))
 	}
 
 	if len(priorRound) > 0 {
 		b.WriteString("## Previous Round Discussion\n")
-		for i, r := range priorRound {
-			b.WriteString(fmt.Sprintf("### Reviewer %d\n%s\n\n", i+1, r))
+		for _, r := range priorRound {
+			b.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
 		}
 	}
 

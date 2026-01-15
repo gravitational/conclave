@@ -126,11 +126,14 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 
 	var outputBuilder strings.Builder
 
-	// Stream output
+	// Stream output, but only accumulate non-stderr lines for context passing
 	for line := range agentOutput {
-		outputBuilder.WriteString(line)
-		outputBuilder.WriteString("\n")
 		output <- line
+		// Don't include stderr lines in accumulated context - only real content
+		if !strings.HasPrefix(line, "[stderr]") && !strings.HasPrefix(line, "[!]") {
+			outputBuilder.WriteString(line)
+			outputBuilder.WriteString("\n")
+		}
 	}
 
 	// Check exit status - trust the CLI's exit code

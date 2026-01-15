@@ -317,13 +317,13 @@ func StreamMultiple(agents []Agent, prompts []string, prefixes []string, colors 
 }
 
 // StreamMultipleWithStatus runs multiple agents with a unified status display
-func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) []string {
+func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) []AgentResult {
 	n := len(agents)
 	if len(prompts) != n || len(names) != n {
 		panic("mismatched slice lengths")
 	}
 
-	results := make([]string, n)
+	results := make([]AgentResult, n)
 	sd := display.NewStatusDisplay(n, false)
 
 	// Configure agents
@@ -338,7 +338,11 @@ func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) 
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = StreamWithStatus(agents[idx], prompts[idx], idx, sd)
+			content := StreamWithStatus(agents[idx], prompts[idx], idx, sd)
+			results[idx] = AgentResult{
+				Content: content,
+				Agent:   GetMeta(agents[idx]),
+			}
 		}(i)
 	}
 
@@ -349,13 +353,13 @@ func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) 
 }
 
 // StreamMultipleWithWeb runs multiple agents with web dashboard updates
-func StreamMultipleWithWeb(agents []Agent, prompts []string, names []string, hub *web.Hub) []string {
+func StreamMultipleWithWeb(agents []Agent, prompts []string, names []string, hub *web.Hub) []AgentResult {
 	n := len(agents)
 	if len(prompts) != n || len(names) != n {
 		panic("mismatched slice lengths")
 	}
 
-	results := make([]string, n)
+	results := make([]AgentResult, n)
 	contexts := make([]context.Context, n)
 	cancels := make([]context.CancelFunc, n)
 
@@ -394,7 +398,11 @@ func StreamMultipleWithWeb(agents []Agent, prompts []string, names []string, hub
 		go func(idx int) {
 			defer wg.Done()
 			defer GlobalRegistry.Unregister(idx)
-			results[idx] = StreamWithWebCtx(contexts[idx], agents[idx], prompts[idx], idx, names[idx], hub)
+			content := StreamWithWebCtx(contexts[idx], agents[idx], prompts[idx], idx, names[idx], hub)
+			results[idx] = AgentResult{
+				Content: content,
+				Agent:   GetMeta(agents[idx]),
+			}
 		}(i)
 	}
 
