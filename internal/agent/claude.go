@@ -40,8 +40,11 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		defer close(errCh)
 
 		// Run through login shell to pick up user's PATH from shell profile
-		// Using -p (print mode) which is inherently safe - just returns text, no tool execution
-		claudeArgs := "claude"
+		// Using agentic mode with tool access for thorough code analysis
+		// --dangerously-skip-permissions auto-approves tool use
+		// --tools restricts to read-only operations for safety (no Edit, Write, Bash)
+		claudeArgs := "claude --dangerously-skip-permissions"
+		claudeArgs += " --tools Read,Grep,Glob,LSP"
 		if a.model != "" {
 			claudeArgs += " --model " + a.model
 		}
