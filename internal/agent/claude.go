@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -30,6 +31,18 @@ func (a *ClaudeAgent) Model() string {
 	return a.model
 }
 
+// claudeStreamEvent represents a streaming event from Claude CLI
+type claudeStreamEvent struct {
+	Type  string `json:"type"`
+	Event struct {
+		Type  string `json:"type"`
+		Delta struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"delta"`
+	} `json:"event"`
+}
+
 // Run executes a prompt using the Claude CLI
 func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)
@@ -43,8 +56,10 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		// Using agentic mode with tool access for thorough code analysis
 		// --dangerously-skip-permissions auto-approves tool use
 		// --tools restricts to read-only operations for safety (no Edit, Write, Bash)
+		// --output-format stream-json with --include-partial-messages for real-time streaming
 		claudeArgs := "claude --dangerously-skip-permissions"
 		claudeArgs += " --tools Read,Grep,Glob,LSP"
+		claudeArgs += " --output-format stream-json --verbose --include-partial-messages"
 		if a.model != "" {
 			claudeArgs += " --model " + a.model
 		}
@@ -83,17 +98,54 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 				stderrMu.Lock()
 				stderrLines = append(stderrLines, line)
 				stderrMu.Unlock()
-				// Only show stderr in verbose mode; otherwise just collect for error reporting
-				if a.verbose {
-					output <- "[stderr] " + line
-				}
 			}
 		}()
 
-		// Stream stdout
+		// Stream stdout - parse JSON for streaming text
 		scanner := bufio.NewScanner(stdout)
+		// Increase buffer size for potentially large JSON lines
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+
+		var textBuffer strings.Builder
+
 		for scanner.Scan() {
-			output <- scanner.Text()
+			line := scanner.Text()
+
+			// Try to parse as streaming event
+			var event claudeStreamEvent
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
+				// Not JSON, output as-is (shouldn't happen in stream-json mode)
+				output <- line
+				continue
+			}
+
+			// Handle different event types
+			switch event.Type {
+			case "stream_event":
+				// Check for content delta
+				if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
+					text := event.Event.Delta.Text
+					textBuffer.WriteString(text)
+
+					// Output complete lines as they arrive
+					for {
+						content := textBuffer.String()
+						idx := strings.Index(content, "\n")
+						if idx == -1 {
+							break
+						}
+						output <- content[:idx]
+						textBuffer.Reset()
+						textBuffer.WriteString(content[idx+1:])
+					}
+				}
+			}
+		}
+
+		// Output any remaining text
+		if textBuffer.Len() > 0 {
+			output <- textBuffer.String()
 		}
 
 		// Wait for stderr collection to complete
