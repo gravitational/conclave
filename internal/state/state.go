@@ -51,6 +51,15 @@ type Perspective struct {
 	Content  string    `yaml:"-"` // Stored in body, not frontmatter
 }
 
+// Verdict represents a judge's decision on a finding
+type Verdict struct {
+	FindingNum int       `yaml:"finding_num"`
+	Decision   string    `yaml:"decision"` // "RAISE" or "DISMISS"
+	Confidence string    `yaml:"confidence,omitempty"`
+	Agent      AgentMeta `yaml:"agent"`
+	Reasoning  string    `yaml:"-"` // In body
+}
+
 // FormatLabel returns a human-readable label like "Agent 1 (Claude/sonnet)"
 func (p *Perspective) FormatLabel() string {
 	if p.Agent.Model != "" {
@@ -496,4 +505,109 @@ func (s *State) LoadResult(planID, subsystem string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// SaveVerdict saves a judge's verdict on a finding
+func (s *State) SaveVerdict(planID, subsystem string, findingNum int, agent AgentMeta, decision, confidence, reasoning string) (string, error) {
+	dir := filepath.Join(s.dir, "verdicts", planID[:8], subsystem)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+
+	// Build frontmatter
+	frontmatter := struct {
+		FindingNum int    `yaml:"finding_num"`
+		Decision   string `yaml:"decision"`
+		Confidence string `yaml:"confidence,omitempty"`
+		Provider   string `yaml:"provider"`
+		Model      string `yaml:"model,omitempty"`
+	}{
+		FindingNum: findingNum,
+		Decision:   decision,
+		Confidence: confidence,
+		Provider:   agent.Provider,
+		Model:      agent.Model,
+	}
+
+	fm, err := yaml.Marshal(frontmatter)
+	if err != nil {
+		return "", err
+	}
+
+	// Build content with frontmatter
+	var output strings.Builder
+	output.WriteString("---\n")
+	output.Write(fm)
+	output.WriteString("---\n\n")
+	output.WriteString(reasoning)
+
+	path := filepath.Join(dir, fmt.Sprintf("verdict-%d.md", findingNum))
+	if err := os.WriteFile(path, []byte(output.String()), 0644); err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+// LoadVerdicts loads all verdicts for a subsystem
+func (s *State) LoadVerdicts(planID, subsystem string) ([]Verdict, error) {
+	dir := filepath.Join(s.dir, "verdicts", planID[:8], subsystem)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var verdicts []Verdict
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		content := string(data)
+		v := Verdict{}
+
+		// Parse frontmatter if present
+		if strings.HasPrefix(content, "---\n") {
+			endIdx := strings.Index(content[4:], "\n---\n")
+			if endIdx != -1 {
+				fmContent := content[4 : 4+endIdx]
+				var fm struct {
+					FindingNum int    `yaml:"finding_num"`
+					Decision   string `yaml:"decision"`
+					Confidence string `yaml:"confidence"`
+					Provider   string `yaml:"provider"`
+					Model      string `yaml:"model"`
+				}
+				if err := yaml.Unmarshal([]byte(fmContent), &fm); err == nil {
+					v.FindingNum = fm.FindingNum
+					v.Decision = fm.Decision
+					v.Confidence = fm.Confidence
+					v.Agent = AgentMeta{Provider: fm.Provider, Model: fm.Model}
+				}
+				v.Reasoning = strings.TrimPrefix(content[4+endIdx+5:], "\n")
+			} else {
+				v.Reasoning = content
+			}
+		} else {
+			v.Reasoning = content
+		}
+
+		verdicts = append(verdicts, v)
+	}
+
+	// Sort by finding number
+	sort.Slice(verdicts, func(i, j int) bool {
+		return verdicts[i].FindingNum < verdicts[j].FindingNum
+	})
+
+	return verdicts, nil
 }

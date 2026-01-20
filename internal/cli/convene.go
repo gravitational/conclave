@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/convene"
@@ -17,11 +19,12 @@ var (
 
 var conveneCmd = &cobra.Command{
 	Use:   "convene",
-	Short: "Run multi-round debate on assessment findings",
-	Long: `Load the perspectives from an assessment and run a multi-round debate:
-- Round 1: Agents review initial findings
-- Round 2: Agents respond to each other
-- Final: Synthesize into report`,
+	Short: "Run adversarial review on assessment findings",
+	Long: `Load the perspectives from an assessment and run adversarial review:
+- Steel Man: Make strongest case for each finding
+- Critique: Argue against each finding
+- Judge: Decide RAISE or DISMISS for each
+- Synthesis: Combine verdicts into final report`,
 	RunE: runConvene,
 }
 
@@ -29,6 +32,44 @@ func init() {
 	conveneCmd.Flags().StringVar(&convenePlanID, "plan", "", "Plan UUID to use (defaults to most recent)")
 	conveneCmd.Flags().StringVar(&conveneSubsystem, "subsystem", "", "Subsystem slug to convene on (required)")
 	rootCmd.AddCommand(conveneCmd)
+}
+
+// parsedVerdict holds the parsed components from a judge's output
+type parsedVerdict struct {
+	Decision   string
+	Reasoning  string
+	Confidence string
+}
+
+// parseVerdict extracts VERDICT, REASONING, and CONFIDENCE from judge output
+func parseVerdict(content string) parsedVerdict {
+	result := parsedVerdict{
+		Decision:   "DISMISS", // Default if parsing fails
+		Confidence: "LOW",
+	}
+
+	// Match VERDICT: RAISE or VERDICT: DISMISS
+	verdictRe := regexp.MustCompile(`(?i)VERDICT:\s*(RAISE|DISMISS)`)
+	if match := verdictRe.FindStringSubmatch(content); len(match) > 1 {
+		result.Decision = strings.ToUpper(match[1])
+	}
+
+	// Match CONFIDENCE: HIGH/MEDIUM/LOW
+	confRe := regexp.MustCompile(`(?i)CONFIDENCE:\s*(HIGH|MEDIUM|LOW)`)
+	if match := confRe.FindStringSubmatch(content); len(match) > 1 {
+		result.Confidence = strings.ToUpper(match[1])
+	}
+
+	// Extract reasoning (everything between REASONING: and CONFIDENCE:)
+	reasonRe := regexp.MustCompile(`(?is)REASONING:\s*(.+?)(?:CONFIDENCE:|$)`)
+	if match := reasonRe.FindStringSubmatch(content); len(match) > 1 {
+		result.Reasoning = strings.TrimSpace(match[1])
+	} else {
+		// Fallback: use the whole content as reasoning
+		result.Reasoning = content
+	}
+
+	return result
 }
 
 func runConvene(cmd *cobra.Command, args []string) error {
@@ -68,6 +109,16 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	}
 
 	display.PrintStatus("Loaded %d perspectives", len(perspectives))
+
+	// Filter to valid findings only
+	findings := convene.FilterValidFindings(perspectives)
+	if len(findings) == 0 {
+		display.PrintStatus("No findings to debate - all assessors found no vulnerabilities")
+		return nil
+	}
+
+	n := len(findings)
+	display.PrintStatus("Valid findings: %d", n)
 	display.PrintStatus("Providers: %s", AgentBackend())
 	fmt.Println()
 
@@ -77,33 +128,65 @@ func runConvene(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create debate: %w", err)
 	}
 
-	// Round 1: Review initial findings
-	display.PrintStatus("Round 1: Reviewing initial findings")
+	// Phase 1: Steel Man
+	display.PrintStatus("Phase 1: Steel Man (%d findings)", n)
 	fmt.Println()
-	round1Prompts := debate.Round1Prompts(perspectives)
-	agents1 := DistributeAgents(3)
-	round1Results := agent.StreamMultipleWithStatus(agents1, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
-	round1 := toDebateRounds(round1Results)
-	fmt.Println()
-
-	// Round 2: Respond to each other
-	display.PrintStatus("Round 2: Debating findings")
-	fmt.Println()
-	round2Prompts := debate.Round2Prompts(perspectives, round1)
-	agents2 := DistributeAgents(3)
-	round2Results := agent.StreamMultipleWithStatus(agents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
-	round2 := toDebateRounds(round2Results)
+	steelManPrompts := debate.SteelManPrompts(findings)
+	steelManAgents := DistributeAgents(n)
+	steelManNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		steelManNames[i] = fmt.Sprintf("Advocate %d", i+1)
+	}
+	steelManResults := agent.StreamMultipleWithStatus(steelManAgents, steelManPrompts, steelManNames)
+	steelMen := toDebateRounds(steelManResults)
 	fmt.Println()
 
-	// Save debate outputs
-	for i, r := range round1 {
-		st.SaveDebate(p.ID, conveneSubsystem, i+1, r.Content)
+	// Phase 2: Critique
+	display.PrintStatus("Phase 2: Critique (%d findings)", n)
+	fmt.Println()
+	critiquePrompts := debate.CritiquePrompts(findings, steelMen)
+	critiqueAgents := DistributeAgents(n)
+	critiqueNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		critiqueNames[i] = fmt.Sprintf("Critic %d", i+1)
+	}
+	critiqueResults := agent.StreamMultipleWithStatus(critiqueAgents, critiquePrompts, critiqueNames)
+	critiques := toDebateRounds(critiqueResults)
+	fmt.Println()
+
+	// Phase 3: Judge
+	display.PrintStatus("Phase 3: Judge (%d findings)", n)
+	fmt.Println()
+	judgePrompts := debate.JudgePrompts(findings, steelMen, critiques)
+	judgeAgents := DistributeAgents(n)
+	judgeNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		judgeNames[i] = fmt.Sprintf("Judge %d", i+1)
+	}
+	judgeResults := agent.StreamMultipleWithStatus(judgeAgents, judgePrompts, judgeNames)
+	judges := toDebateRounds(judgeResults)
+	fmt.Println()
+
+	// Parse verdicts and save
+	var raiseCount, dismissCount int
+	for i, result := range judgeResults {
+		verdict := parseVerdict(result.Content)
+		agentMeta := state.AgentMeta{Provider: result.Agent.Provider, Model: result.Agent.Model}
+		st.SaveVerdict(p.ID, conveneSubsystem, i+1, agentMeta, verdict.Decision, verdict.Confidence, result.Content)
+
+		if verdict.Decision == "RAISE" {
+			raiseCount++
+		} else {
+			dismissCount++
+		}
 	}
 
-	// Final synthesis
-	display.PrintStatus("Final: Synthesizing report")
-	finalPrompt := debate.FinalPrompt(perspectives, round1, round2)
-	result := agent.StreamSilent(CreateAgent(), finalPrompt, "Producing final report")
+	display.PrintStatus("Verdicts: %d RAISE, %d DISMISS", raiseCount, dismissCount)
+
+	// Phase 4: Synthesis
+	display.PrintStatus("Phase 4: Synthesis")
+	synthesisPrompt := debate.SynthesisPrompt(findings, steelMen, critiques, judges)
+	result := agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
 
 	// Save result
 	resultPath, err := st.SaveResult(p.ID, conveneSubsystem, result)
@@ -112,7 +195,7 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	display.PrintSuccess("Debate complete")
+	display.PrintSuccess("Adversarial review complete")
 	display.PrintSuccess("Result: %s", resultPath)
 
 	return nil

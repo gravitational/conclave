@@ -8,6 +8,21 @@ import (
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
+// FilterValidFindings returns perspectives that contain actual findings
+// (filters out "No critical vulnerabilities found" responses)
+func FilterValidFindings(perspectives []state.Perspective) []state.Perspective {
+	var valid []state.Perspective
+	for _, p := range perspectives {
+		lower := strings.ToLower(p.Content)
+		if !strings.Contains(lower, "no critical vulnerabilities found") &&
+			!strings.Contains(lower, "no significant vulnerabilities") &&
+			!strings.Contains(lower, "no major vulnerabilities") {
+			valid = append(valid, p)
+		}
+	}
+	return valid
+}
+
 // Debate manages multi-round debates between agents
 type Debate struct {
 	context *context.RepoContext
@@ -63,146 +78,166 @@ func (d *Debate) WithContext(ctx *context.RepoContext) *Debate {
 	return d
 }
 
-// Round1Prompts creates prompts for the first debate round (review initial findings)
-func (d *Debate) Round1Prompts(perspectives []state.Perspective) []string {
-	base := d.buildBaseContext(perspectives, nil)
+// SteelManPrompts creates prompts for the steel man phase (advocate for each finding)
+// Returns one prompt per finding
+func (d *Debate) SteelManPrompts(findings []state.Perspective) []string {
+	prompts := make([]string, len(findings))
 
-	prompt := fmt.Sprintf(`You are a security researcher reviewing initial findings from other researchers.
+	for i, finding := range findings {
+		prompts[i] = fmt.Sprintf(`You are an advocate for this security finding. Your job is to make the STRONGEST
+possible case that this is a real, exploitable vulnerability.
 
-%s
-
-Review these findings critically:
-- Which findings are valid and exploitable?
-- Which seem like false positives or overblown?
-- What did other reviewers miss?
-- How would you prioritize these issues?
-
-Be specific. Reference the actual code and explain your reasoning. When referring to other agents' findings, use their labels (e.g., "Agent 1 (Claude)").
-`, base)
-
-	// All agents get same prompt, vary slightly
-	return []string{
-		prompt,
-		prompt + "\nBe thorough in your analysis.",
-		prompt + "\nConsider how these vulnerabilities could be chained together.",
-	}
-}
-
-// Round2Prompts creates prompts for the second round (respond to each other)
-// Note: Does not repeat base context from Round 1 to save tokens
-func (d *Debate) Round2Prompts(perspectives []state.Perspective, round1 []DebateRound) []string {
-	var b strings.Builder
-
-	// Only include the Round 1 discussion, not the full base context
-	// (agents already saw context in Round 1)
-	b.WriteString("## Round 1 Discussion\n")
-	for _, r := range round1 {
-		b.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
-	}
-
-	prompt := fmt.Sprintf(`You are a security researcher in a peer review discussion.
-
-Refer to the codebase context and initial security assessments from Round 1.
-
-%s
-
-The debate has begun. Other researchers have shared their views above. Now:
-- Respond to points you disagree with
-- Reinforce points you agree with
-- Resolve any conflicting assessments
-- Refine the severity ratings based on the discussion
-
-The goal is to converge on the true security issues. Reference agents by their labels when responding to their points.
-`, b.String())
-
-	return []string{
-		prompt,
-		prompt + "\nFocus on reaching consensus.",
-		prompt + "\nHighlight the most critical issues that need immediate attention.",
-	}
-}
-
-// FinalPrompt creates the synthesis prompt (final round, single agent)
-// Note: Does not repeat base context from previous rounds to save tokens
-func (d *Debate) FinalPrompt(perspectives []state.Perspective, round1, round2 []DebateRound) string {
-	// Combine all rounds (without repeating base context)
-	var allDiscussion strings.Builder
-	allDiscussion.WriteString("## Initial Assessments\n")
-	for _, p := range perspectives {
-		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", p.FormatLabel(), p.Content))
-	}
-	allDiscussion.WriteString("## Debate Round 1\n")
-	for _, r := range round1 {
-		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
-	}
-	allDiscussion.WriteString("## Debate Round 2\n")
-	for _, r := range round2 {
-		allDiscussion.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
-	}
-
-	return fmt.Sprintf(`You are producing the final security report after a thorough peer review.
-
-Refer to the codebase context and subsystem details provided in previous rounds.
-
-## Full Discussion
-%s
-
-Based on this complete discussion, produce the FINAL security report with the following sections:
-
-1. **Confirmed Vulnerabilities** - Issues the reviewers agreed are real and exploitable
-   - Include severity, specific code locations, and exploitation details
-   - For each finding, note which agents identified it (e.g., "Found by: Agent 1 (Claude), Agent 2 (Gemini)")
-
-2. **Disputed/Unclear** - Issues where reviewers disagreed
-   - Note the disagreement (e.g., "Agent 1 (Claude) found this; Agent 3 (Codex) disputed")
-   - Include the reasoning from both sides
-
-3. **Dismissed** - Issues determined to be false positives or non-exploitable
-   - Note which agent(s) initially raised them and why they were dismissed
-
-4. **Agent Comparison Summary**
-   - Briefly summarize each agent's approach and key findings
-   - Note any patterns (e.g., "Agent 1 (Claude) focused on injection risks, Agent 2 (Gemini) on authorization")
-   - Highlight areas of agreement and disagreement between agents
-
-5. **Recommendations** - Prioritized remediation steps
-
-Be definitive. This is the final report.
-`, allDiscussion.String())
-}
-
-func (d *Debate) buildBaseContext(perspectives []state.Perspective, priorRound []DebateRound) string {
-	var b strings.Builder
-
-	b.WriteString(fmt.Sprintf(`## Codebase Context
+## Codebase Context
 %s
 
 ## Subsystem Under Review
 **Name:** %s
 **Paths:** %s
 **Description:** %s
-`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description))
 
-	if d.context != nil {
-		if general := d.context.ForPrompt(false); general != "" { // Use full context for Round 1
-			b.WriteString("\n" + general + "\n")
-		}
-		if specific := d.context.ForSubsystemPrompt(d.sub.Slug); specific != "" {
-			b.WriteString("\n" + specific + "\n")
-		}
+## Finding from Security Researcher (%s)
+%s
+
+Build the strongest case:
+1. Why this vulnerability is real and exploitable
+2. Specific attack scenarios with step-by-step exploitation
+3. What an attacker gains (concrete impact)
+4. Why this should be prioritized for immediate fix
+
+Be thorough and persuasive. Assume the finding is valid and argue for it.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content)
 	}
 
-	b.WriteString("\n## Initial Security Assessments\n")
-	for _, p := range perspectives {
-		b.WriteString(fmt.Sprintf("### %s\n%s\n\n", p.FormatLabel(), p.Content))
-	}
-
-	if len(priorRound) > 0 {
-		b.WriteString("## Previous Round Discussion\n")
-		for _, r := range priorRound {
-			b.WriteString(fmt.Sprintf("### %s\n%s\n\n", r.FormatLabel(), r.Content))
-		}
-	}
-
-	return b.String()
+	return prompts
 }
+
+// CritiquePrompts creates prompts for the critique phase (argue against each finding)
+// Returns one prompt per finding, each seeing the original finding + steel man argument
+func (d *Debate) CritiquePrompts(findings []state.Perspective, steelMen []DebateRound) []string {
+	prompts := make([]string, len(findings))
+
+	for i := range findings {
+		finding := findings[i]
+		steelMan := steelMen[i]
+
+		prompts[i] = fmt.Sprintf(`You are a skeptical security reviewer. Your job is to argue that this finding
+should NOT be raised to engineers.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+## Original Finding (%s)
+%s
+
+## Advocate's Argument (Steel Man)
+%s
+
+Argue against raising this finding:
+1. Why it might be a false positive (misread code, wrong assumptions)
+2. Why it's not exploitable in practice (mitigating factors, prerequisites)
+3. Why the severity is overstated
+4. Why busy engineers shouldn't spend time on this
+
+Be rigorous. Find weaknesses in the argument. Challenge assumptions.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content, steelMan.Content)
+	}
+
+	return prompts
+}
+
+// JudgePrompts creates prompts for the judge phase (decide RAISE or DISMISS)
+// Returns one prompt per finding, each seeing finding + steel man + critique
+func (d *Debate) JudgePrompts(findings []state.Perspective, steelMen, critiques []DebateRound) []string {
+	prompts := make([]string, len(findings))
+
+	for i := range findings {
+		finding := findings[i]
+		steelMan := steelMen[i]
+		critique := critiques[i]
+
+		prompts[i] = fmt.Sprintf(`You are an impartial judge deciding whether to raise this finding to engineers.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+## Original Finding (%s)
+%s
+
+## Advocate's Argument (FOR raising)
+%s
+
+## Critic's Argument (AGAINST raising)
+%s
+
+Render your verdict in this EXACT format:
+
+VERDICT: [RAISE or DISMISS]
+
+REASONING:
+[2-3 sentences explaining your decision, weighing both arguments]
+
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+
+Be decisive. Engineers' time is valuable - only RAISE findings worth their attention.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content, steelMan.Content, critique.Content)
+	}
+
+	return prompts
+}
+
+// SynthesisPrompt creates the final synthesis prompt combining all verdicts
+func (d *Debate) SynthesisPrompt(findings []state.Perspective, steelMen, critiques, judges []DebateRound) string {
+	var b strings.Builder
+
+	b.WriteString("## Findings and Verdicts\n\n")
+	for i := range findings {
+		finding := findings[i]
+		judge := judges[i]
+
+		b.WriteString(fmt.Sprintf("### Finding %d (%s)\n", i+1, finding.FormatLabel()))
+		b.WriteString(fmt.Sprintf("**Original Finding:**\n%s\n\n", finding.Content))
+		b.WriteString(fmt.Sprintf("**Judge's Verdict:**\n%s\n\n", judge.Content))
+		b.WriteString("---\n\n")
+	}
+
+	return fmt.Sprintf(`You are producing the final security report after adversarial review.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+%s
+
+Produce the final report:
+
+1. **Confirmed Vulnerabilities** - Findings with RAISE verdict
+   - Merge any convergent findings (multiple assessors found same issue)
+   - Include: severity, location, exploitation details, remediation
+   - Note which agent(s) originally identified each issue
+
+2. **Dismissed** - Findings with DISMISS verdict
+   - Brief note on why each was dismissed
+
+3. **Recommendations** - Prioritized remediation steps
+
+If multiple assessors identified the same vulnerability, synthesize into a single
+finding with the most complete information across all reports.
+
+Be definitive. This is the final report.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, b.String())
+}
+

@@ -227,8 +227,28 @@ func runFull(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	display.PrintSuccess("Assessment complete")
 
-	// STEP 3: Multi-round Debate
-	display.PrintHeader("STEP 3: DEBATE")
+	// STEP 3: Adversarial Review
+	display.PrintHeader("STEP 3: ADVERSARIAL REVIEW")
+
+	// Filter to valid findings only
+	findings := convene.FilterValidFindings(perspectives)
+	if len(findings) == 0 {
+		display.PrintStatus("No findings to debate - all assessors found no vulnerabilities")
+
+		// Save empty result
+		resultPath, err := st.SaveResult(p.ID, subsystem.Slug, "# No Vulnerabilities Found\n\nAll security assessors found no critical vulnerabilities in this subsystem.")
+		if err != nil {
+			return fmt.Errorf("failed to save result: %w", err)
+		}
+
+		display.PrintHeader("AUDIT COMPLETE")
+		display.PrintSuccess("Subsystem: %s", subsystem.Name)
+		display.PrintSuccess("Results: %s", resultPath)
+		return nil
+	}
+
+	n := len(findings)
+	display.PrintStatus("Valid findings: %d", n)
 
 	debate, err := convene.NewDebate(p, subsystem.Slug)
 	if err != nil {
@@ -236,56 +256,96 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	debate.WithContext(repoCtx)
 
-	// Round 1: Review initial findings
+	// Phase 1: Steel Man
 	if hub != nil {
-		hub.SetPhase("debate", "Debate Round 1: Reviewing findings")
+		hub.SetPhase("debate", "Phase 1: Steel Man")
 	}
-	display.PrintStatus("Round 1: Reviewing initial findings")
+	display.PrintStatus("Phase 1: Steel Man (%d findings)", n)
 	fmt.Println()
-	round1Prompts := debate.Round1Prompts(perspectives)
-	debateAgents := DistributeAgents(3)
-	var round1Results []agent.AgentResult
+	steelManPrompts := debate.SteelManPrompts(findings)
+	steelManAgents := DistributeAgents(n)
+	steelManNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		steelManNames[i] = fmt.Sprintf("Advocate %d", i+1)
+	}
+	var steelManResults []agent.AgentResult
 	if hub != nil {
-		round1Results = agent.StreamMultipleWithWeb(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
+		steelManResults = agent.StreamMultipleWithWeb(steelManAgents, steelManPrompts, steelManNames, hub)
 	} else {
-		round1Results = agent.StreamMultipleWithStatus(debateAgents, round1Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+		steelManResults = agent.StreamMultipleWithStatus(steelManAgents, steelManPrompts, steelManNames)
 	}
-	round1 := toDebateRounds(round1Results)
+	steelMen := toDebateRounds(steelManResults)
 	fmt.Println()
 
-	// Round 2: Respond to each other
+	// Phase 2: Critique
 	if hub != nil {
-		hub.SetPhase("debate", "Debate Round 2: Cross-review")
+		hub.SetPhase("debate", "Phase 2: Critique")
 	}
-	display.PrintStatus("Round 2: Debating findings")
+	display.PrintStatus("Phase 2: Critique (%d findings)", n)
 	fmt.Println()
-	round2Prompts := debate.Round2Prompts(perspectives, round1)
-	debateAgents2 := DistributeAgents(3)
-	var round2Results []agent.AgentResult
+	critiquePrompts := debate.CritiquePrompts(findings, steelMen)
+	critiqueAgents := DistributeAgents(n)
+	critiqueNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		critiqueNames[i] = fmt.Sprintf("Critic %d", i+1)
+	}
+	var critiqueResults []agent.AgentResult
 	if hub != nil {
-		round2Results = agent.StreamMultipleWithWeb(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"}, hub)
+		critiqueResults = agent.StreamMultipleWithWeb(critiqueAgents, critiquePrompts, critiqueNames, hub)
 	} else {
-		round2Results = agent.StreamMultipleWithStatus(debateAgents2, round2Prompts, []string{"Reviewer 1", "Reviewer 2", "Reviewer 3"})
+		critiqueResults = agent.StreamMultipleWithStatus(critiqueAgents, critiquePrompts, critiqueNames)
 	}
-	round2 := toDebateRounds(round2Results)
+	critiques := toDebateRounds(critiqueResults)
 	fmt.Println()
 
-	// Save debate rounds
-	for i, r := range round1 {
-		st.SaveDebate(p.ID, subsystem.Slug, i+1, r.Content)
+	// Phase 3: Judge
+	if hub != nil {
+		hub.SetPhase("debate", "Phase 3: Judge")
+	}
+	display.PrintStatus("Phase 3: Judge (%d findings)", n)
+	fmt.Println()
+	judgePrompts := debate.JudgePrompts(findings, steelMen, critiques)
+	judgeAgents := DistributeAgents(n)
+	judgeNames := make([]string, n)
+	for i := 0; i < n; i++ {
+		judgeNames[i] = fmt.Sprintf("Judge %d", i+1)
+	}
+	var judgeResults []agent.AgentResult
+	if hub != nil {
+		judgeResults = agent.StreamMultipleWithWeb(judgeAgents, judgePrompts, judgeNames, hub)
+	} else {
+		judgeResults = agent.StreamMultipleWithStatus(judgeAgents, judgePrompts, judgeNames)
+	}
+	judges := toDebateRounds(judgeResults)
+	fmt.Println()
+
+	// Parse verdicts and save
+	var raiseCount, dismissCount int
+	for i, res := range judgeResults {
+		verdict := parseVerdict(res.Content)
+		agentMeta := state.AgentMeta{Provider: res.Agent.Provider, Model: res.Agent.Model}
+		st.SaveVerdict(p.ID, subsystem.Slug, i+1, agentMeta, verdict.Decision, verdict.Confidence, res.Content)
+
+		if verdict.Decision == "RAISE" {
+			raiseCount++
+		} else {
+			dismissCount++
+		}
 	}
 
-	// Final: Synthesize into report
+	display.PrintStatus("Verdicts: %d RAISE, %d DISMISS", raiseCount, dismissCount)
+
+	// Phase 4: Synthesis
 	if hub != nil {
-		hub.SetPhase("synthesize", "Final synthesis")
+		hub.SetPhase("synthesize", "Phase 4: Synthesis")
 	}
-	display.PrintStatus("Final: Synthesizing report")
-	finalPrompt := debate.FinalPrompt(perspectives, round1, round2)
+	display.PrintStatus("Phase 4: Synthesis")
+	synthesisPrompt := debate.SynthesisPrompt(findings, steelMen, critiques, judges)
 	var result string
 	if hub != nil {
-		result = agent.StreamSilentWithWeb(CreateAgent(), finalPrompt, "Producing final report", hub)
+		result = agent.StreamSilentWithWeb(CreateAgent(), synthesisPrompt, "Synthesizing final report", hub)
 	} else {
-		result = agent.StreamSilent(CreateAgent(), finalPrompt, "Producing final report")
+		result = agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
 	}
 
 	// Save result

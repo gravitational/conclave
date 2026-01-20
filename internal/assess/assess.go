@@ -76,7 +76,7 @@ Each prompt should instruct the agent to independently review a subsystem for se
 **Description:** %s
 **Interactions:** %s
 %s
-Generate 3 different prompts for independent security reviews. Each should encourage thorough exploration and finding serious, exploitable vulnerabilities with specific code locations and attack scenarios.
+Generate 3 identical prompts for independent security reviews. Each prompt should instruct the agent to identify the SINGLE MOST CRITICAL security vulnerability in this subsystem. The agent must provide: (1) specific vulnerable code location, (2) clear attack vector explanation, (3) how to exploit it in practice, (4) what the attacker gains, and (5) severity rating with justification. If multiple issues exist, report ONLY the most severe one. Quality over quantity.
 
 CRITICAL: In each generated prompt, you MUST include the ACTUAL subsystem details:
 - Use the actual name "%s" (not a placeholder)
@@ -132,24 +132,27 @@ func (g *PromptGenerator) staticPrompts(plan *state.Plan, subsystem *state.Subsy
 %s
 ## Your Task
 
-Conduct an independent security review of this subsystem. Explore the code thoroughly and identify any security vulnerabilities you find.
+Conduct an independent security review of this subsystem. Explore the code thoroughly.
 
-For each finding:
-1. Identify the specific vulnerable code location (file and line)
-2. Explain the attack vector clearly
-3. Assess real-world exploitability in this context
-4. Rate severity (Critical/High/Medium)
+Your task: Identify the SINGLE MOST CRITICAL security vulnerability in this subsystem.
 
-Focus only on SERIOUS, EXPLOITABLE issues. Ignore theoretical concerns, best practice nitpicks, or low-impact issues.
+You must provide:
+1. The specific vulnerable code location (file and line)
+2. A clear explanation of the attack vector
+3. How an attacker would exploit this in practice
+4. What the attacker gains (data theft, privilege escalation, etc.)
+5. Severity rating (Critical/High/Medium) with justification
 
-Be thorough. Follow the code paths. Think like an attacker.
+If you find multiple issues, report ONLY the most severe one. Quality over quantity.
+
+If you find no exploitable vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked.
 `, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextSection)
 
-	// Vary the framing slightly
+	// All 3 agents get the same prompt - if they converge on the same issue, that's a strong signal
 	return []string{
 		prompt,
-		prompt + "\nTake your time and be thorough.",
-		prompt + "\nThink creatively about how this code could be abused.",
+		prompt,
+		prompt,
 	}
 }
 
