@@ -27,7 +27,9 @@ The workflow consists of:
   1. plan    - Analyze codebase and identify subsystems
   2. assess  - Spin up agents to review subsystems in parallel
   3. convene - Have agents debate and refine their findings
-  4. complete - Synthesize final results`,
+  4. complete - Synthesize final results
+
+You must specify at least one provider: --claude, --codex, or --gemini`,
 }
 
 func init() {
@@ -64,12 +66,20 @@ func enabledProviders() []string {
 		providers = append(providers, "gemini")
 	}
 
-	// Default to codex if no flags specified
-	if len(providers) == 0 {
-		return []string{"codex"}
-	}
-
 	return providers
+}
+
+// ValidateProviders checks that at least one provider flag is specified
+func ValidateProviders() error {
+	if len(enabledProviders()) == 0 {
+		return fmt.Errorf("no provider specified. Use at least one of: --claude, --codex, --gemini")
+	}
+	return nil
+}
+
+// validateProvidersPreRun is a cobra PreRunE compatible version of ValidateProviders
+func validateProvidersPreRun(cmd *cobra.Command, args []string) error {
+	return ValidateProviders()
 }
 
 // getModel returns the model for a provider, or empty string for default

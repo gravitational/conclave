@@ -22,8 +22,9 @@ with key findings, patterns, and context for future audits.
 
 This is like 'feedback' but automated - the LLM decides what's worth
 remembering based on the audit results.`,
-	Args: cobra.NoArgs,
-	RunE: runLearn,
+	Args:    cobra.NoArgs,
+	PreRunE: validateProvidersPreRun,
+	RunE:    runLearn,
 }
 
 func init() {

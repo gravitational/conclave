@@ -25,7 +25,8 @@ var conveneCmd = &cobra.Command{
 - Critique: Argue against each finding
 - Judge: Decide RAISE or DISMISS for each
 - Synthesis: Combine verdicts into final report`,
-	RunE: runConvene,
+	PreRunE: validateProvidersPreRun,
+	RunE:    runConvene,
 }
 
 func init() {

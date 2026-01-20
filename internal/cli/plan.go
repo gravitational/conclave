@@ -17,8 +17,9 @@ var planCmd = &cobra.Command{
 	Short: "Analyze codebase and create a plan",
 	Long: `Analyze the codebase at the given path (or current directory) and create
 a detailed plan breaking it down into subsystems for security analysis.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runPlan,
+	Args:    cobra.MaximumNArgs(1),
+	PreRunE: validateProvidersPreRun,
+	RunE:    runPlan,
 }
 
 func init() {

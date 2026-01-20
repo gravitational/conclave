@@ -30,8 +30,9 @@ Examples:
   conclave feedback 'IDOR in user profile is confirmed and being fixed'
 
   conclave feedback 'focus more on the payment processing code next time'`,
-	Args: cobra.ExactArgs(1),
-	RunE: runFeedback,
+	Args:    cobra.ExactArgs(1),
+	PreRunE: validateProvidersPreRun,
+	RunE:    runFeedback,
 }
 
 func init() {

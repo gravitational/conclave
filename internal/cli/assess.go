@@ -24,7 +24,8 @@ var assessCmd = &cobra.Command{
 	Long: `Pick a random subsystem from the plan and spin up three agents in parallel
 to review it for critical security vulnerabilities, logic flaws, and other
 serious issues.`,
-	RunE: runAssess,
+	PreRunE: validateProvidersPreRun,
+	RunE:    runAssess,
 }
 
 func init() {

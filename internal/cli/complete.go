@@ -19,7 +19,8 @@ var completeCmd = &cobra.Command{
 	Short: "Synthesize final results from debates",
 	Long: `Review the debate outputs and synthesize the most promising findings
 into a final report.`,
-	RunE: runComplete,
+	PreRunE: validateProvidersPreRun,
+	RunE:    runComplete,
 }
 
 func init() {

@@ -63,8 +63,9 @@ var runCmd = &cobra.Command{
 4. Complete with final synthesis
 
 This is equivalent to running: plan → assess → convene → complete`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runFull,
+	Args:    cobra.MaximumNArgs(1),
+	PreRunE: validateProvidersPreRun,
+	RunE:    runFull,
 }
 
 func init() {
