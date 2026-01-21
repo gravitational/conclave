@@ -129,51 +129,43 @@ func runConvene(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create debate: %w", err)
 	}
 
-	// Phase 1: Steel Man
-	display.PrintStatus("Phase 1: Steel Man (%d findings)", n)
-	fmt.Println()
-	steelManPrompts := debate.SteelManPrompts(findings)
-	steelManAgents := DistributeAgents(n)
-	steelManNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		steelManNames[i] = fmt.Sprintf("Advocate %d", i+1)
-	}
-	steelManResults := agent.StreamMultipleWithStatus(steelManAgents, steelManPrompts, steelManNames)
-	steelMen := toDebateRounds(steelManResults)
+	// Run pipelined adversarial review
+	display.PrintStatus("Running pipelined adversarial review (%d findings)", n)
 	fmt.Println()
 
-	// Phase 2: Critique
-	display.PrintStatus("Phase 2: Critique (%d findings)", n)
-	fmt.Println()
-	critiquePrompts := debate.CritiquePrompts(findings, steelMen)
-	critiqueAgents := DistributeAgents(n)
-	critiqueNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		critiqueNames[i] = fmt.Sprintf("Critic %d", i+1)
+	// Build finding labels for display
+	findingLabels := make([]string, n)
+	for i, f := range findings {
+		findingLabels[i] = fmt.Sprintf("Finding %d (%s)", i+1, f.Agent.Provider)
 	}
-	critiqueResults := agent.StreamMultipleWithStatus(critiqueAgents, critiquePrompts, critiqueNames)
-	critiques := toDebateRounds(critiqueResults)
+
+	// Configure pipeline with terminal display
+	pipelineDisplay := display.NewPipelineDisplay(n, findingLabels)
+
+	pipelineResults := agent.RunPipelinedDebate(agent.PipelineConfig{
+		Debate:      debate,
+		Findings:    findings,
+		CreateAgent: CreateAgent,
+		Hub:         nil, // No web dashboard in convene command
+		Display:     pipelineDisplay,
+	})
 	fmt.Println()
 
-	// Phase 3: Judge
-	display.PrintStatus("Phase 3: Judge (%d findings)", n)
-	fmt.Println()
-	judgePrompts := debate.JudgePrompts(findings, steelMen, critiques)
-	judgeAgents := DistributeAgents(n)
-	judgeNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		judgeNames[i] = fmt.Sprintf("Judge %d", i+1)
-	}
-	judgeResults := agent.StreamMultipleWithStatus(judgeAgents, judgePrompts, judgeNames)
-	judges := toDebateRounds(judgeResults)
-	fmt.Println()
+	// Convert pipeline results for synthesis
+	steelMen := agent.ToDebateRounds(pipelineResults, agent.PhaseSteelMan)
+	critiques := agent.ToDebateRounds(pipelineResults, agent.PhaseCritique)
+	judges := agent.ToDebateRounds(pipelineResults, agent.PhaseJudge)
 
 	// Parse verdicts and save
 	var raiseCount, dismissCount int
-	for i, result := range judgeResults {
-		verdict := parseVerdict(result.Content)
-		agentMeta := state.AgentMeta{Provider: result.Agent.Provider, Model: result.Agent.Model}
-		st.SaveVerdict(p.ID, conveneSubsystem, i+1, agentMeta, verdict.Decision, verdict.Confidence, result.Content)
+	for i, res := range pipelineResults {
+		if res.Error != nil {
+			display.PrintError("Finding %d failed: %v", i+1, res.Error)
+			continue
+		}
+		verdict := parseVerdict(res.Judge.Content)
+		agentMeta := state.AgentMeta{Provider: res.Judge.Agent.Provider, Model: res.Judge.Agent.Model}
+		st.SaveVerdict(p.ID, conveneSubsystem, i+1, agentMeta, verdict.Decision, verdict.Confidence, res.Judge.Content)
 
 		if verdict.Decision == "RAISE" {
 			raiseCount++

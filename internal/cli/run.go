@@ -21,20 +21,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// toDebateRounds converts agent results to debate rounds
-func toDebateRounds(results []agent.AgentResult) []convene.DebateRound {
-	rounds := make([]convene.DebateRound, len(results))
-	for i, r := range results {
-		rounds[i] = convene.DebateRound{
-			AgentNum: i + 1,
-			Provider: r.Agent.Provider,
-			Model:    r.Agent.Model,
-			Content:  r.Content,
-		}
-	}
-	return rounds
-}
-
 // toPerspectives converts agent results to perspectives
 func toPerspectives(results []agent.AgentResult) []state.Perspective {
 	perspectives := make([]state.Perspective, len(results))
@@ -148,13 +134,17 @@ func runFull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		display.PrintStatus("Creating new plan...")
 		generator := plan.NewGenerator(CreateAgent(), st)
-		var output string
+		var streamResult agent.StreamSilentResult
 		if hub != nil {
-			output = agent.StreamSilentWithWeb(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase", hub)
+			output := agent.StreamSilentWithWeb(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase", hub)
+			streamResult = agent.StreamSilentResult{Content: output}
 		} else {
-			output = agent.StreamSilent(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase")
+			streamResult = agent.StreamSilentWithError(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase")
 		}
-		p, err = generator.ParseAndSave(output, absPath)
+		if streamResult.Error != nil {
+			return fmt.Errorf("agent error: %w", streamResult.Error)
+		}
+		p, err = generator.ParseAndSave(streamResult.Content, absPath)
 		if err != nil {
 			return fmt.Errorf("failed to generate plan: %w", err)
 		}
@@ -257,75 +247,46 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	debate.WithContext(repoCtx)
 
-	// Phase 1: Steel Man
-	if hub != nil {
-		hub.SetPhase("debate", "Phase 1: Steel Man")
-	}
-	display.PrintStatus("Phase 1: Steel Man (%d findings)", n)
-	fmt.Println()
-	steelManPrompts := debate.SteelManPrompts(findings)
-	steelManAgents := DistributeAgents(n)
-	steelManNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		steelManNames[i] = fmt.Sprintf("Advocate %d", i+1)
-	}
-	var steelManResults []agent.AgentResult
-	if hub != nil {
-		steelManResults = agent.StreamMultipleWithWeb(steelManAgents, steelManPrompts, steelManNames, hub)
-	} else {
-		steelManResults = agent.StreamMultipleWithStatus(steelManAgents, steelManPrompts, steelManNames)
-	}
-	steelMen := toDebateRounds(steelManResults)
+	// Run pipelined adversarial review
+	display.PrintStatus("Running pipelined adversarial review (%d findings)", n)
 	fmt.Println()
 
-	// Phase 2: Critique
-	if hub != nil {
-		hub.SetPhase("debate", "Phase 2: Critique")
+	// Build finding labels for display
+	findingLabels := make([]string, n)
+	for i, f := range findings {
+		findingLabels[i] = fmt.Sprintf("Finding %d (%s)", i+1, f.Agent.Provider)
 	}
-	display.PrintStatus("Phase 2: Critique (%d findings)", n)
-	fmt.Println()
-	critiquePrompts := debate.CritiquePrompts(findings, steelMen)
-	critiqueAgents := DistributeAgents(n)
-	critiqueNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		critiqueNames[i] = fmt.Sprintf("Critic %d", i+1)
+
+	// Configure pipeline
+	var pipelineDisplay *display.PipelineDisplay
+	if hub == nil {
+		pipelineDisplay = display.NewPipelineDisplay(n, findingLabels)
 	}
-	var critiqueResults []agent.AgentResult
-	if hub != nil {
-		critiqueResults = agent.StreamMultipleWithWeb(critiqueAgents, critiquePrompts, critiqueNames, hub)
-	} else {
-		critiqueResults = agent.StreamMultipleWithStatus(critiqueAgents, critiquePrompts, critiqueNames)
-	}
-	critiques := toDebateRounds(critiqueResults)
+
+	pipelineResults := agent.RunPipelinedDebate(agent.PipelineConfig{
+		Debate:      debate,
+		Findings:    findings,
+		CreateAgent: CreateAgent,
+		Hub:         hub,
+		Display:     pipelineDisplay,
+	})
 	fmt.Println()
 
-	// Phase 3: Judge
-	if hub != nil {
-		hub.SetPhase("debate", "Phase 3: Judge")
-	}
-	display.PrintStatus("Phase 3: Judge (%d findings)", n)
-	fmt.Println()
-	judgePrompts := debate.JudgePrompts(findings, steelMen, critiques)
-	judgeAgents := DistributeAgents(n)
-	judgeNames := make([]string, n)
-	for i := 0; i < n; i++ {
-		judgeNames[i] = fmt.Sprintf("Judge %d", i+1)
-	}
-	var judgeResults []agent.AgentResult
-	if hub != nil {
-		judgeResults = agent.StreamMultipleWithWeb(judgeAgents, judgePrompts, judgeNames, hub)
-	} else {
-		judgeResults = agent.StreamMultipleWithStatus(judgeAgents, judgePrompts, judgeNames)
-	}
-	judges := toDebateRounds(judgeResults)
-	fmt.Println()
+	// Convert pipeline results for synthesis
+	steelMen := agent.ToDebateRounds(pipelineResults, agent.PhaseSteelMan)
+	critiques := agent.ToDebateRounds(pipelineResults, agent.PhaseCritique)
+	judges := agent.ToDebateRounds(pipelineResults, agent.PhaseJudge)
 
 	// Parse verdicts and save
 	var raiseCount, dismissCount int
-	for i, res := range judgeResults {
-		verdict := parseVerdict(res.Content)
-		agentMeta := state.AgentMeta{Provider: res.Agent.Provider, Model: res.Agent.Model}
-		st.SaveVerdict(p.ID, subsystem.Slug, i+1, agentMeta, verdict.Decision, verdict.Confidence, res.Content)
+	for i, res := range pipelineResults {
+		if res.Error != nil {
+			display.PrintError("Finding %d failed: %v", i+1, res.Error)
+			continue
+		}
+		verdict := parseVerdict(res.Judge.Content)
+		agentMeta := state.AgentMeta{Provider: res.Judge.Agent.Provider, Model: res.Judge.Agent.Model}
+		st.SaveVerdict(p.ID, subsystem.Slug, i+1, agentMeta, verdict.Decision, verdict.Confidence, res.Judge.Content)
 
 		if verdict.Decision == "RAISE" {
 			raiseCount++

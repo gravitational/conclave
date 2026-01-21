@@ -166,9 +166,21 @@ func StreamWithWeb(ag Agent, prompt string, idx int, name string, hub *web.Hub) 
 	return result.String()
 }
 
+// StreamSilentResult holds output and any error from a silent stream
+type StreamSilentResult struct {
+	Content string
+	Error   error
+}
+
 // StreamSilent runs an agent and collects output without displaying
 // Shows a simple spinner instead
 func StreamSilent(ag Agent, prompt string, description string) string {
+	result := StreamSilentWithError(ag, prompt, description)
+	return result.Content
+}
+
+// StreamSilentWithError runs an agent and collects output, returning both content and error
+func StreamSilentWithError(ag Agent, prompt string, description string) StreamSilentResult {
 	ctx := context.Background()
 	output, errCh := ag.Run(ctx, prompt)
 
@@ -191,11 +203,11 @@ func StreamSilent(ag Agent, prompt string, description string) string {
 
 	if err := <-errCh; err != nil {
 		fmt.Printf("\r  %s... %s✗%s\n", description, ColorRed, ColorReset)
-		return result.String()
+		return StreamSilentResult{Content: result.String(), Error: err}
 	}
 
 	fmt.Printf("\r  %s... %s✓%s (%d lines)\n", description, ColorGreen, ColorReset, lineCount)
-	return result.String()
+	return StreamSilentResult{Content: result.String(), Error: nil}
 }
 
 // StreamSilentWithWeb runs an agent silently but sends updates to web hub

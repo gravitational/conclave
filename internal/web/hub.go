@@ -12,13 +12,15 @@ import (
 type MessageType string
 
 const (
-	MsgAgentStatus   MessageType = "agent_status"
-	MsgAgentLog      MessageType = "agent_log"
-	MsgPhaseChange   MessageType = "phase_change"
-	MsgPhaseComplete MessageType = "phase_complete"
-	MsgError         MessageType = "error"
-	MsgCommand       MessageType = "command"
-	MsgCommandAck    MessageType = "command_ack"
+	MsgAgentStatus    MessageType = "agent_status"
+	MsgAgentLog       MessageType = "agent_log"
+	MsgPhaseChange    MessageType = "phase_change"
+	MsgPhaseComplete  MessageType = "phase_complete"
+	MsgError          MessageType = "error"
+	MsgCommand        MessageType = "command"
+	MsgCommandAck     MessageType = "command_ack"
+	MsgPipelineStart  MessageType = "pipeline_start"
+	MsgFindingUpdate  MessageType = "finding_update"
 )
 
 // CommandData holds a control command from the frontend
@@ -73,6 +75,28 @@ type PhaseData struct {
 	Description string `json:"description"`
 }
 
+// FindingState holds the current state of a finding in pipeline mode
+type FindingState struct {
+	FindingIdx   int              `json:"findingIdx"`
+	Label        string           `json:"label"`
+	CurrentPhase string           `json:"currentPhase"` // "steelman", "critique", "judge", "done"
+	Verdict      string           `json:"verdict,omitempty"` // "RAISE" or "DISMISS" when done
+	Agent        *AgentStatusData `json:"agent,omitempty"`
+}
+
+// PipelineStartData holds initialization data for pipeline mode
+type PipelineStartData struct {
+	FindingLabels []string `json:"findingLabels"`
+}
+
+// FindingUpdateData holds per-finding phase/agent updates
+type FindingUpdateData struct {
+	FindingIdx   int              `json:"findingIdx"`
+	Phase        string           `json:"phase"`
+	Verdict      string           `json:"verdict,omitempty"`
+	Agent        *AgentStatusData `json:"agent,omitempty"`
+}
+
 // PhaseCompleteData holds complete phase data for timeline
 type PhaseCompleteData struct {
 	Phase       string               `json:"phase"`
@@ -115,6 +139,11 @@ type Hub struct {
 	phaseStartTime time.Time
 	agentOutput    map[int]*strings.Builder // Full accumulated output per agent
 	phaseHistory   []PhaseCompleteData      // Completed phases for timeline
+
+	// Pipeline mode state
+	pipelineMode   bool
+	findingLabels  []string
+	findingStates  map[int]*FindingState
 
 	// Control functions
 	killAgent AgentKiller
@@ -274,6 +303,36 @@ func (h *Hub) sendCurrentState(client *Client) {
 		}
 		if data, err := json.Marshal(msg); err == nil {
 			client.send <- data
+		}
+	}
+
+	// If in pipeline mode, send pipeline state
+	if h.pipelineMode {
+		// Send pipeline start message
+		msg := Message{
+			Type:      MsgPipelineStart,
+			Timestamp: time.Now(),
+			Data:      PipelineStartData{FindingLabels: h.findingLabels},
+		}
+		if data, err := json.Marshal(msg); err == nil {
+			client.send <- data
+		}
+
+		// Send each finding's current state
+		for _, state := range h.findingStates {
+			msg := Message{
+				Type:      MsgFindingUpdate,
+				Timestamp: time.Now(),
+				Data: FindingUpdateData{
+					FindingIdx: state.FindingIdx,
+					Phase:      state.CurrentPhase,
+					Verdict:    state.Verdict,
+					Agent:      state.Agent,
+				},
+			}
+			if data, err := json.Marshal(msg); err == nil {
+				client.send <- data
+			}
 		}
 	}
 
@@ -449,4 +508,98 @@ func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// SetPipelineMode initializes the hub for pipelined debate mode
+func (h *Hub) SetPipelineMode(findingLabels []string) {
+	h.mu.Lock()
+	h.pipelineMode = true
+	h.findingLabels = findingLabels
+	h.findingStates = make(map[int]*FindingState, len(findingLabels))
+
+	// Initialize finding states
+	for i, label := range findingLabels {
+		h.findingStates[i] = &FindingState{
+			FindingIdx:   i,
+			Label:        label,
+			CurrentPhase: "pending",
+		}
+	}
+
+	// Clear regular phase state
+	h.phase = "pipeline"
+	h.phaseDesc = "Adversarial Review (Pipelined)"
+	h.phaseStartTime = time.Now()
+	h.agents = make(map[int]*AgentStatusData)
+	h.logs = make(map[int][]string)
+	h.agentOutput = make(map[int]*strings.Builder)
+	h.mu.Unlock()
+
+	// Broadcast pipeline start
+	h.Broadcast(Message{
+		Type:      MsgPipelineStart,
+		Timestamp: time.Now(),
+		Data:      PipelineStartData{FindingLabels: findingLabels},
+	})
+}
+
+// UpdateFindingPhase updates a finding's current phase and agent
+func (h *Hub) UpdateFindingPhase(findingIdx int, phase string, agent *AgentStatusData) {
+	h.mu.Lock()
+	if state, ok := h.findingStates[findingIdx]; ok {
+		state.CurrentPhase = phase
+		state.Agent = agent
+	}
+	h.mu.Unlock()
+
+	// Also update the agent in the main agent map
+	if agent != nil {
+		h.UpdateAgent(agent)
+	}
+
+	h.Broadcast(Message{
+		Type:      MsgFindingUpdate,
+		Timestamp: time.Now(),
+		Data: FindingUpdateData{
+			FindingIdx: findingIdx,
+			Phase:      phase,
+			Agent:      agent,
+		},
+	})
+}
+
+// CompleteFinding marks a finding as done with its verdict
+func (h *Hub) CompleteFinding(findingIdx int, verdict string) {
+	h.mu.Lock()
+	if state, ok := h.findingStates[findingIdx]; ok {
+		state.CurrentPhase = "done"
+		state.Verdict = verdict
+	}
+	h.mu.Unlock()
+
+	h.Broadcast(Message{
+		Type:      MsgFindingUpdate,
+		Timestamp: time.Now(),
+		Data: FindingUpdateData{
+			FindingIdx: findingIdx,
+			Phase:      "done",
+			Verdict:    verdict,
+		},
+	})
+}
+
+// IsPipelineMode returns whether the hub is in pipeline mode
+func (h *Hub) IsPipelineMode() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.pipelineMode
+}
+
+// ExitPipelineMode clears pipeline mode state
+func (h *Hub) ExitPipelineMode() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pipelineMode = false
+	h.findingLabels = nil
+	h.findingStates = nil
 }

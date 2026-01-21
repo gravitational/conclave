@@ -267,6 +267,137 @@
             background: #0d1117;
         }
 
+        /* Pipeline/Kanban styles */
+        .pipeline-view {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: auto 1fr;
+            height: 100%;
+            background: #0d1117;
+            gap: 1px;
+        }
+
+        .pipeline-column {
+            background: #161b22;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .pipeline-column-header {
+            padding: 12px 16px;
+            background: #21262d;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pipeline-column-header .count {
+            background: #30363d;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .pipeline-column-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .pipeline-card {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pipeline-card:hover {
+            border-color: #58a6ff;
+            transform: translateY(-1px);
+        }
+
+        .pipeline-card.selected {
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 1px #58a6ff;
+        }
+
+        .pipeline-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .pipeline-card-header .finding-label {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .pipeline-card-header .verdict-badge {
+            margin-left: auto;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .verdict-badge.raise {
+            background: #238636;
+            color: white;
+        }
+
+        .verdict-badge.dismiss {
+            background: #484f58;
+            color: #8b949e;
+        }
+
+        .pipeline-card-body {
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .pipeline-card-body .agent-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pipeline-terminal-area {
+            grid-column: 1 / -1;
+            height: 300px;
+            background: #0d1117;
+            border-top: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pipeline-terminal-header {
+            padding: 8px 16px;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .pipeline-terminal-content {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .pipeline-terminal-content .xterm {
+            height: 100%;
+            padding: 8px;
+        }
+
         .agent-sidebar {
             background: #161b22;
             border-left: 1px solid #30363d;
@@ -521,6 +652,14 @@
         let fitAddons = {}; // fit addons per agent
         let expandedTimelinePhases = new Set();
 
+        // Pipeline mode state
+        let pipelineMode = false;
+        let findingLabels = [];
+        let findingStates = {}; // findingIdx -> {phase, verdict, agent}
+        let selectedFindingIdx = null;
+        let pipelineTerminal = null;
+        let pipelineFitAddon = null;
+
         marked.setOptions({
             breaks: true,
             gfm: true
@@ -563,6 +702,12 @@
                     break;
                 case 'command_ack':
                     handleCommandAck(msg.data);
+                    break;
+                case 'pipeline_start':
+                    handlePipelineStart(msg.data);
+                    break;
+                case 'finding_update':
+                    handleFindingUpdate(msg.data);
                     break;
             }
         }
@@ -630,6 +775,14 @@
             const term = terminals[agentId];
             if (term) {
                 term.writeln(data.line);
+            }
+
+            // In pipeline mode, also write to pipeline terminal if this is the selected finding's agent
+            if (pipelineMode && pipelineTerminal && selectedFindingIdx !== null) {
+                const state = findingStates[selectedFindingIdx];
+                if (state && state.agent && String(state.agent.id) === agentId) {
+                    pipelineTerminal.writeln(data.line);
+                }
             }
         }
 
@@ -912,6 +1065,249 @@
             return div.innerHTML;
         }
 
+        // Pipeline mode handlers
+        function handlePipelineStart(data) {
+            pipelineMode = true;
+            findingLabels = data.findingLabels || [];
+            findingStates = {};
+            selectedFindingIdx = null;
+
+            // Initialize finding states
+            for (let i = 0; i < findingLabels.length; i++) {
+                findingStates[i] = {
+                    phase: 'pending',
+                    verdict: null,
+                    agent: null
+                };
+            }
+
+            // Update phase display
+            currentPhase = 'pipeline';
+            currentPhaseDesc = 'Adversarial Review (Pipelined)';
+            updatePhaseDisplay();
+
+            // Render pipeline view
+            renderPipelineView();
+            renderAgentSidebar();
+        }
+
+        function handleFindingUpdate(data) {
+            if (!pipelineMode) return;
+
+            const idx = data.findingIdx;
+            if (findingStates[idx]) {
+                findingStates[idx].phase = data.phase;
+                if (data.verdict) {
+                    findingStates[idx].verdict = data.verdict;
+                }
+                if (data.agent) {
+                    findingStates[idx].agent = data.agent;
+                    // Also update the main agents map
+                    currentAgents[String(data.agent.id)] = data.agent;
+                }
+            }
+
+            renderPipelineView();
+            renderAgentSidebar();
+        }
+
+        function renderPipelineView() {
+            const container = document.getElementById('agent-panels');
+
+            // Count findings per column
+            const columns = {
+                steelman: [],
+                critique: [],
+                judge: [],
+                done: []
+            };
+
+            for (let i = 0; i < findingLabels.length; i++) {
+                const state = findingStates[i] || { phase: 'pending' };
+                if (state.phase === 'pending' || state.phase === 'steelman') {
+                    columns.steelman.push(i);
+                } else if (state.phase === 'critique') {
+                    columns.critique.push(i);
+                } else if (state.phase === 'judge') {
+                    columns.judge.push(i);
+                } else if (state.phase === 'done') {
+                    columns.done.push(i);
+                }
+            }
+
+            container.className = 'pipeline-view';
+            container.innerHTML = `
+                <div class="pipeline-column">
+                    <div class="pipeline-column-header">
+                        Steel Man <span class="count">${columns.steelman.length}</span>
+                    </div>
+                    <div class="pipeline-column-content" id="col-steelman">
+                        ${columns.steelman.map(i => renderPipelineCard(i)).join('')}
+                    </div>
+                </div>
+                <div class="pipeline-column">
+                    <div class="pipeline-column-header">
+                        Critique <span class="count">${columns.critique.length}</span>
+                    </div>
+                    <div class="pipeline-column-content" id="col-critique">
+                        ${columns.critique.map(i => renderPipelineCard(i)).join('')}
+                    </div>
+                </div>
+                <div class="pipeline-column">
+                    <div class="pipeline-column-header">
+                        Judge <span class="count">${columns.judge.length}</span>
+                    </div>
+                    <div class="pipeline-column-content" id="col-judge">
+                        ${columns.judge.map(i => renderPipelineCard(i)).join('')}
+                    </div>
+                </div>
+                <div class="pipeline-column">
+                    <div class="pipeline-column-header">
+                        Done <span class="count">${columns.done.length}</span>
+                    </div>
+                    <div class="pipeline-column-content" id="col-done">
+                        ${columns.done.map(i => renderPipelineCard(i)).join('')}
+                    </div>
+                </div>
+                <div class="pipeline-terminal-area">
+                    <div class="pipeline-terminal-header" id="pipeline-terminal-header">
+                        ${selectedFindingIdx !== null ? `Output: ${findingLabels[selectedFindingIdx]}` : 'Click a finding to view output'}
+                    </div>
+                    <div class="pipeline-terminal-content" id="pipeline-terminal"></div>
+                </div>
+            `;
+
+            // Create or reuse terminal
+            setupPipelineTerminal();
+        }
+
+        function renderPipelineCard(findingIdx) {
+            const state = findingStates[findingIdx] || { phase: 'pending' };
+            const label = findingLabels[findingIdx] || `Finding ${findingIdx + 1}`;
+            const isSelected = selectedFindingIdx === findingIdx;
+            const agent = state.agent;
+
+            let verdictBadge = '';
+            if (state.phase === 'done' && state.verdict) {
+                const verdictClass = state.verdict === 'RAISE' ? 'raise' : 'dismiss';
+                verdictBadge = `<span class="verdict-badge ${verdictClass}">${state.verdict}</span>`;
+            }
+
+            let agentInfo = '';
+            if (agent && state.phase !== 'done') {
+                const providerClass = (agent.provider || '').toLowerCase();
+                agentInfo = `
+                    <div class="agent-info">
+                        <span class="agent-status ${agent.state}"></span>
+                        <span class="agent-provider ${providerClass}">${agent.model || agent.provider}</span>
+                        <span>${agent.lines || 0} lines</span>
+                    </div>
+                `;
+            } else if (state.phase === 'done') {
+                agentInfo = '<div class="agent-info">Complete</div>';
+            } else {
+                agentInfo = '<div class="agent-info">Waiting...</div>';
+            }
+
+            return `
+                <div class="pipeline-card ${isSelected ? 'selected' : ''}" onclick="selectFinding(${findingIdx})">
+                    <div class="pipeline-card-header">
+                        <span class="finding-label">${escapeHtml(label)}</span>
+                        ${verdictBadge}
+                    </div>
+                    <div class="pipeline-card-body">
+                        ${agentInfo}
+                    </div>
+                </div>
+            `;
+        }
+
+        function selectFinding(idx) {
+            selectedFindingIdx = idx;
+
+            // Update cards selection state
+            document.querySelectorAll('.pipeline-card').forEach((card, i) => {
+                card.classList.toggle('selected', i === idx);
+            });
+
+            // Update terminal header
+            const header = document.getElementById('pipeline-terminal-header');
+            if (header) {
+                header.textContent = `Output: ${findingLabels[idx]}`;
+            }
+
+            // Get the agent ID for this finding's current phase
+            const state = findingStates[idx];
+            if (state && state.agent) {
+                const agentId = String(state.agent.id);
+                // Display logs for this agent
+                if (pipelineTerminal) {
+                    pipelineTerminal.clear();
+                    const logs = currentAgentLogs[agentId] || [];
+                    logs.forEach(line => pipelineTerminal.writeln(line));
+                }
+            }
+        }
+
+        function setupPipelineTerminal() {
+            const container = document.getElementById('pipeline-terminal');
+            if (!container) return;
+
+            if (pipelineTerminal) {
+                // Terminal already exists, just make sure it's in the container
+                return;
+            }
+
+            pipelineTerminal = new Terminal({
+                theme: {
+                    background: '#0d1117',
+                    foreground: '#c9d1d9',
+                    cursor: '#c9d1d9',
+                    cursorAccent: '#0d1117',
+                    selection: 'rgba(56, 139, 253, 0.3)',
+                    black: '#484f58',
+                    red: '#ff7b72',
+                    green: '#3fb950',
+                    yellow: '#d29922',
+                    blue: '#58a6ff',
+                    magenta: '#bc8cff',
+                    cyan: '#39c5cf',
+                    white: '#b1bac4',
+                },
+                fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+                fontSize: 12,
+                lineHeight: 1.4,
+                scrollback: 10000,
+                cursorBlink: false,
+                cursorStyle: 'underline',
+                disableStdin: true,
+                convertEol: true,
+            });
+
+            pipelineFitAddon = new FitAddon.FitAddon();
+            pipelineTerminal.loadAddon(pipelineFitAddon);
+            pipelineTerminal.open(container);
+
+            setTimeout(() => {
+                try {
+                    pipelineFitAddon.fit();
+                } catch (e) {}
+            }, 50);
+        }
+
+        function exitPipelineMode() {
+            pipelineMode = false;
+            findingLabels = [];
+            findingStates = {};
+            selectedFindingIdx = null;
+
+            if (pipelineTerminal) {
+                pipelineTerminal.dispose();
+                pipelineTerminal = null;
+                pipelineFitAddon = null;
+            }
+        }
+
         // Handle window resize
         window.addEventListener('resize', () => {
             Object.entries(fitAddons).forEach(([id, addon]) => {
@@ -919,6 +1315,11 @@
                     addon.fit();
                 } catch (e) {}
             });
+            if (pipelineFitAddon) {
+                try {
+                    pipelineFitAddon.fit();
+                } catch (e) {}
+            }
         });
 
         // Update durations every second

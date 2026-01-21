@@ -195,6 +195,95 @@ Be decisive. Engineers' time is valuable - only RAISE findings worth their atten
 	return prompts
 }
 
+// SteelManPromptForFinding creates a steel man prompt for a single finding
+func (d *Debate) SteelManPromptForFinding(finding state.Perspective) string {
+	return fmt.Sprintf(`You are an advocate for this security finding. Your job is to make the STRONGEST
+possible case that this is a real, exploitable vulnerability.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+## Finding from Security Researcher (%s)
+%s
+
+Build the strongest case:
+1. Why this vulnerability is real and exploitable
+2. Specific attack scenarios with step-by-step exploitation
+3. What an attacker gains (concrete impact)
+4. Why this should be prioritized for immediate fix
+
+Be thorough and persuasive. Assume the finding is valid and argue for it.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content)
+}
+
+// CritiquePromptForFinding creates a critique prompt for a single finding with its steel man
+func (d *Debate) CritiquePromptForFinding(finding state.Perspective, steelMan DebateRound) string {
+	return fmt.Sprintf(`You are a skeptical security reviewer. Your job is to argue that this finding
+should NOT be raised to engineers.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+## Original Finding (%s)
+%s
+
+## Advocate's Argument (Steel Man)
+%s
+
+Argue against raising this finding:
+1. Why it might be a false positive (misread code, wrong assumptions)
+2. Why it's not exploitable in practice (mitigating factors, prerequisites)
+3. Why the severity is overstated
+4. Why busy engineers shouldn't spend time on this
+
+Be rigorous. Find weaknesses in the argument. Challenge assumptions.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content, steelMan.Content)
+}
+
+// JudgePromptForFinding creates a judge prompt for a single finding with steel man and critique
+func (d *Debate) JudgePromptForFinding(finding state.Perspective, steelMan, critique DebateRound) string {
+	return fmt.Sprintf(`You are an impartial judge deciding whether to raise this finding to engineers.
+
+## Codebase Context
+%s
+
+## Subsystem Under Review
+**Name:** %s
+**Paths:** %s
+**Description:** %s
+
+## Original Finding (%s)
+%s
+
+## Advocate's Argument (FOR raising)
+%s
+
+## Critic's Argument (AGAINST raising)
+%s
+
+Render your verdict in this EXACT format:
+
+VERDICT: [RAISE or DISMISS]
+
+REASONING:
+[2-3 sentences explaining your decision, weighing both arguments]
+
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+
+Be decisive. Engineers' time is valuable - only RAISE findings worth their attention.
+`, d.plan.Overview, d.sub.Name, d.sub.Paths, d.sub.Description, finding.FormatLabel(), finding.Content, steelMan.Content, critique.Content)
+}
+
 // SynthesisPrompt creates the final synthesis prompt combining all verdicts
 func (d *Debate) SynthesisPrompt(findings []state.Perspective, steelMen, critiques, judges []DebateRound) string {
 	var b strings.Builder
