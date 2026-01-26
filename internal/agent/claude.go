@@ -65,7 +65,7 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		}
 		claudeArgs += " -p " + shellQuote(prompt)
 
-		cmd := exec.CommandContext(ctx, "sh", "-lc", claudeArgs)
+		cmd := exec.CommandContext(ctx, "bash", "-lc", claudeArgs)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {

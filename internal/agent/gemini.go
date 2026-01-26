@@ -55,7 +55,7 @@ func (a *GeminiAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 			geminiArgs += " --model " + a.model
 		}
 
-		cmd := exec.CommandContext(ctx, "sh", "-lc", geminiArgs)
+		cmd := exec.CommandContext(ctx, "bash", "-lc", geminiArgs)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()

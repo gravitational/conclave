@@ -48,7 +48,7 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		}
 		codexArgs += " -"
 
-		cmd := exec.CommandContext(ctx, "sh", "-lc", codexArgs)
+		cmd := exec.CommandContext(ctx, "bash", "-lc", codexArgs)
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()
