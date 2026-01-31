@@ -34,8 +34,7 @@ conclave --claude assess              # Assess random subsystem with 3 parallel 
 conclave --claude convene --subsystem X   # Run adversarial review on findings
 conclave --claude complete --subsystem X  # Synthesize final results
 
-# Learning and feedback
-conclave --claude feedback 'message'  # Provide natural language feedback on findings
+# Learning
 conclave --claude learn               # Auto-extract learnings from audit results
 
 # Status (no provider needed)
@@ -54,7 +53,7 @@ conclave --codex=o3:high run          # Run with specified reasoning effort
 ```
 cmd/conclave/main.go          Entry point
 internal/
-  cli/                        Cobra commands (root, plan, assess, convene, complete, status, feedback, learn)
+  cli/                        Cobra commands (root, plan, assess, convene, complete, status, learn)
   agent/                      Agent interface + Codex/Claude/Gemini implementations with streaming
   plan/                       Plan generation and parsing
   assess/                     Assessment prompt generation (focuses on single most critical finding)

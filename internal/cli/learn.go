@@ -20,8 +20,8 @@ var learnCmd = &cobra.Command{
 	Long: `Review the latest audit results and automatically update CONCLAVE.md
 with key findings, patterns, and context for future audits.
 
-This is like 'feedback' but automated - the LLM decides what's worth
-remembering based on the audit results.`,
+The LLM analyzes audit results and decides what's worth remembering
+for future audits of this codebase.`,
 	Args:    cobra.NoArgs,
 	PreRunE: validateProvidersPreRun,
 	RunE:    runLearn,
@@ -92,7 +92,7 @@ func runLearn(cmd *cobra.Command, args []string) error {
 	output := agent.StreamSilent(ag, prompt, "Extracting learnings")
 
 	// Parse and apply
-	updates, err := parseFeedbackResponse(output)
+	updates, err := parseLearnResponse(output)
 	if err != nil {
 		return fmt.Errorf("failed to parse learnings: %w", err)
 	}
@@ -102,7 +102,7 @@ func runLearn(cmd *cobra.Command, args []string) error {
 		ctx.SetOverview(plan.Overview)
 	}
 
-	applyUpdates(ctx, updates)
+	applyLearnUpdates(ctx, updates)
 
 	if err := ctx.Save(); err != nil {
 		return fmt.Errorf("failed to save context: %w", err)
@@ -161,7 +161,7 @@ Do NOT extract:
 Output ONLY in this exact format:
 
 ---FALSE_POSITIVES---
-<leave empty - user provides these via feedback>
+<list patterns that are false positives, one per line>
 ---CONFIRMED_FINDINGS---
 <list each on its own line, format: "subsystem: title | description | severity">
 ---NOTES---
@@ -169,7 +169,153 @@ Output ONLY in this exact format:
 ---FOCUS_AREAS---
 <list each on its own line>
 ---IGNORE_PATTERNS---
-<leave empty - user provides these via feedback>
+<list file patterns to ignore, one per line>
 ---END---
 `, plan.Overview, strings.Join(results, "\n\n"), existingFindings)
+}
+
+type learnUpdates struct {
+	FalsePositives    []struct{ Subsystem, Pattern, Reason string }
+	ConfirmedFindings []struct{ Subsystem, Title, Description, Status string }
+	Notes             []struct{ Subsystem, Note string }
+	FocusAreas        []string
+	IgnorePatterns    []string
+}
+
+func parseLearnResponse(output string) (*learnUpdates, error) {
+	updates := &learnUpdates{}
+
+	sections := map[string]bool{
+		"---FALSE_POSITIVES---":    true,
+		"---CONFIRMED_FINDINGS---": true,
+		"---NOTES---":              true,
+		"---FOCUS_AREAS---":        true,
+		"---IGNORE_PATTERNS---":    true,
+	}
+
+	currentSection := ""
+	var currentLines []string
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if sections[line] {
+			if currentSection != "" {
+				processLearnSection(updates, currentSection, currentLines)
+			}
+			currentSection = line
+			currentLines = nil
+			continue
+		}
+
+		if line == "---END---" {
+			if currentSection != "" {
+				processLearnSection(updates, currentSection, currentLines)
+			}
+			break
+		}
+
+		if currentSection != "" {
+			currentLines = append(currentLines, line)
+		}
+	}
+
+	return updates, nil
+}
+
+func processLearnSection(updates *learnUpdates, section string, lines []string) {
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "<") {
+			continue
+		}
+
+		switch section {
+		case "---FALSE_POSITIVES---":
+			if parts := splitLearnLine(line); len(parts) >= 2 {
+				updates.FalsePositives = append(updates.FalsePositives, struct{ Subsystem, Pattern, Reason string }{
+					Subsystem: parts[0],
+					Pattern:   parts[1],
+					Reason:    safeGetPart(parts, 2),
+				})
+			}
+
+		case "---CONFIRMED_FINDINGS---":
+			if parts := splitLearnLine(line); len(parts) >= 2 {
+				status := safeGetPart(parts, 3)
+				if status == "" {
+					status = "confirmed"
+				}
+				updates.ConfirmedFindings = append(updates.ConfirmedFindings, struct{ Subsystem, Title, Description, Status string }{
+					Subsystem:   parts[0],
+					Title:       parts[1],
+					Description: safeGetPart(parts, 2),
+					Status:      status,
+				})
+			}
+
+		case "---NOTES---":
+			if idx := strings.Index(line, ":"); idx > 0 {
+				updates.Notes = append(updates.Notes, struct{ Subsystem, Note string }{
+					Subsystem: strings.TrimSpace(line[:idx]),
+					Note:      strings.TrimSpace(line[idx+1:]),
+				})
+			}
+
+		case "---FOCUS_AREAS---":
+			updates.FocusAreas = append(updates.FocusAreas, line)
+
+		case "---IGNORE_PATTERNS---":
+			updates.IgnorePatterns = append(updates.IgnorePatterns, line)
+		}
+	}
+}
+
+func splitLearnLine(line string) []string {
+	idx := strings.Index(line, ":")
+	if idx <= 0 {
+		return nil
+	}
+
+	subsystem := strings.TrimSpace(line[:idx])
+	rest := strings.TrimSpace(line[idx+1:])
+
+	parts := strings.Split(rest, "|")
+	result := []string{subsystem}
+	for _, p := range parts {
+		result = append(result, strings.TrimSpace(p))
+	}
+	return result
+}
+
+func safeGetPart(parts []string, idx int) string {
+	if idx < len(parts) {
+		return parts[idx]
+	}
+	return ""
+}
+
+func applyLearnUpdates(ctx *context.RepoContext, updates *learnUpdates) {
+	for _, fp := range updates.FalsePositives {
+		ctx.AddFalsePositive(fp.Subsystem, fp.Pattern, fp.Reason)
+	}
+
+	for _, f := range updates.ConfirmedFindings {
+		ctx.AddFinding(f.Subsystem, f.Title, f.Description, f.Status)
+	}
+
+	for _, n := range updates.Notes {
+		ctx.AddSubsystemNote(n.Subsystem, n.Note)
+	}
+
+	for _, area := range updates.FocusAreas {
+		ctx.AddFocusArea(area)
+	}
+
+	for _, pattern := range updates.IgnorePatterns {
+		ctx.AddIgnorePattern(pattern)
+	}
 }
