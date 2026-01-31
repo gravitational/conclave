@@ -21,7 +21,7 @@ go install ./cmd/conclave
 
 ## CLI Usage
 
-**Important**: You must specify at least one provider flag (`--claude`, `--codex`, or `--gemini`). There is no default.
+**Important**: You must specify at least one provider flag (`--claude`, `--codex`, `--gemini`, or `--opencode`). There is no default.
 
 ```bash
 # Full pipeline (most common usage)
@@ -45,8 +45,13 @@ conclave status                       # Show analysis state
 conclave --claude run --web           # Open web dashboard for real-time monitoring
 conclave --claude run --gist          # Create secret GitHub gist of final report
 
-# Codex reasoning effort (low, medium, high, xhigh)
+# OpenAI reasoning effort (low, medium, high, xhigh)
 conclave --codex=o3:high run          # Run with specified reasoning effort
+
+# Direct OpenCode provider access (75+ providers)
+conclave --opencode=ollama/llama3 run       # Local models via Ollama
+conclave --opencode=openai/gpt-4 run        # Any OpenAI model
+conclave --opencode=openai/o3:high run      # With reasoning effort
 ```
 
 ## Architecture
@@ -55,7 +60,7 @@ conclave --codex=o3:high run          # Run with specified reasoning effort
 cmd/conclave/main.go          Entry point
 internal/
   cli/                        Cobra commands (root, plan, assess, convene, complete, status, feedback, learn)
-  agent/                      Agent interface + Codex/Claude/Gemini implementations with streaming
+  agent/                      Agent interface + OpenCode unified backend with streaming
   plan/                       Plan generation and parsing
   assess/                     Assessment prompt generation (focuses on single most critical finding)
   convene/                    Adversarial review orchestration (Steel Man/Critique/Judge/Synthesis)
@@ -95,18 +100,12 @@ ASSESS: 3 agents → 3 findings (filtered for actual vulnerabilities)
 
 ## Agent Implementations
 
-**Claude** (`internal/agent/claude.go`):
-- Uses agentic mode with read-only tools: `Read`, `Grep`, `Glob`, `LSP`
-- Real-time streaming via `--output-format stream-json --include-partial-messages`
-- Tools like Edit, Write, Bash are blocked for safety
-
-**Gemini** (`internal/agent/gemini.go`):
-- Uses yolo mode (`-y`) for auto-approval
-- Real-time streaming via `--output-format stream-json`
-
-**Codex** (`internal/agent/codex.go`):
-- Uses `codex exec --sandbox workspace-write` for sandboxed execution
-- Line-by-line streaming via stdout
+**OpenCode** (`internal/agent/opencode.go`):
+- Unified backend supporting 75+ providers via OpenCode CLI
+- Uses `--agent plan` for read-only tool access (safety)
+- Real-time streaming via `--format json`
+- Provider mapping: `--claude` → `anthropic/claude-sonnet-4`, `--codex` → `openai/o3`, `--gemini` → `google/gemini-2.5-pro`
+- Supports `--variant` for OpenAI reasoning effort (e.g., `--codex=o3:high`)
 
 **Resilient Agent** (`internal/agent/resilient.go`):
 - Wraps primary agent with fallback list
@@ -142,7 +141,7 @@ This context is loaded and included in agent prompts to improve accuracy over ti
 **state.Subsystem**: Part of codebase to analyze (slug, name, paths, description)
 **state.Perspective**: Single agent's security assessment
 **state.Verdict**: Judge's RAISE/DISMISS decision with confidence
-**agent.Agent**: Interface implemented by Claude/Codex/Gemini agents
+**agent.Agent**: Interface implemented by OpenCode unified agent
 **agent.AgentResult**: Agent output with provider metadata
 
 ## Provider Distribution
