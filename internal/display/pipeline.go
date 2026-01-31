@@ -5,14 +5,26 @@ import (
 	"os"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/term"
 )
+
+// capitalize returns the string with the first letter uppercased
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
 
 // FindingStatus represents the current state of a finding in the pipeline
 type FindingStatus struct {
 	Name      string
 	Provider  string
+	Model     string // Specific model being used (optional)
 	Phase     string // "steelman", "critique", "judge", "done"
 	Activity  string
 	Verdict   string // "RAISE" or "DISMISS" when done
@@ -64,14 +76,15 @@ func NewPipelineDisplay(n int, findingLabels []string) *PipelineDisplay {
 	return pd
 }
 
-// SetPhase updates a finding's current phase and provider
-func (pd *PipelineDisplay) SetPhase(idx int, phase, provider string) {
+// SetPhase updates a finding's current phase, provider, and model
+func (pd *PipelineDisplay) SetPhase(idx int, phase, provider, model string) {
 	pd.mu.Lock()
 	defer pd.mu.Unlock()
 
 	if status, ok := pd.findings[idx]; ok {
 		status.Phase = phase
 		status.Provider = provider
+		status.Model = model
 		status.Activity = "Starting..."
 	}
 }
@@ -209,10 +222,14 @@ func (pd *PipelineDisplay) formatStatus(status *FindingStatus, spinner string) s
 		stateColor = Dim
 	}
 
-	// Provider display
-	provider := status.Provider
-	if provider == "" {
-		provider = "..."
+	// Provider display - show provider with model if available
+	providerDisplay := status.Provider
+	if providerDisplay == "" {
+		providerDisplay = "..."
+	} else if status.Model != "" {
+		providerDisplay = fmt.Sprintf("%s (%s)", capitalize(providerDisplay), status.Model)
+	} else {
+		providerDisplay = capitalize(providerDisplay)
 	}
 
 	// Activity or verdict
@@ -247,11 +264,11 @@ func (pd *PipelineDisplay) formatStatus(status *FindingStatus, spinner string) s
 		activity = activity[:maxActivity-3] + "..."
 	}
 
-	// Format: ⠋ Finding 1 [Claude] Critique - Analyzing...  (1m23s)
+	// Format: ⠋ Finding 1 [Claude (opus)] Critique - Analyzing...  (1m23s)
 	return fmt.Sprintf(" %s%s%s %s%-12s%s [%s%s%s] %s%-10s%s - %s (%s)",
 		stateColor, stateIndicator, Reset,
 		Bold, truncate(status.Name, 12), Reset,
-		providerColor, provider, Reset,
+		providerColor, providerDisplay, Reset,
 		Dim, phaseDisplay, Reset,
 		activity,
 		duration)

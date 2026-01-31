@@ -6,9 +6,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/term"
 )
+
+// capitalize returns the string with the first letter uppercased
+func capitalizeStr(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
 
 // ANSI codes
 const (
@@ -237,13 +248,14 @@ func (sd *StatusDisplay) formatStatus(status *AgentStatus, spinner string) strin
 		stateColor = ColorRed
 	}
 
-	// Build the status line - show model if available, otherwise provider
-	displayName := status.Model
-	if displayName == "" {
-		displayName = status.Provider
-	}
+	// Build the status line - show provider with model if available
+	displayName := status.Provider
 	if displayName == "" {
 		displayName = "..."
+	} else if status.Model != "" {
+		displayName = fmt.Sprintf("%s (%s)", capitalizeStr(displayName), status.Model)
+	} else {
+		displayName = capitalizeStr(displayName)
 	}
 
 	// Activity or state message

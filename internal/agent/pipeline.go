@@ -256,7 +256,7 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 		})
 	}
 	if cfg.Display != nil {
-		cfg.Display.SetPhase(findingIdx, phase, ag.Name())
+		cfg.Display.SetPhase(findingIdx, phase, ag.Name(), model)
 	}
 
 	// Run the agent
