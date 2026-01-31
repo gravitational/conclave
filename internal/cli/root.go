@@ -11,11 +11,10 @@ import (
 )
 
 var (
-	claudeModel   string
-	geminiModel   string
-	codexModel    string
-	opencodeModel string
-	verbose       bool
+	claudeModel string
+	geminiModel string
+	codexModel  string
+	verbose     bool
 )
 
 var rootCmd = &cobra.Command{
@@ -30,21 +29,19 @@ The workflow consists of:
   3. convene - Have agents debate and refine their findings
   4. complete - Synthesize final results
 
-You must specify at least one provider: --claude, --codex, --gemini, or --opencode`,
+You must specify at least one provider: --claude, --codex, or --gemini`,
 }
 
 func init() {
 	// String flags with optional values: --claude or --claude=opus
-	rootCmd.PersistentFlags().StringVar(&claudeModel, "claude", "", "Use Claude via OpenCode (optionally specify model: --claude=opus)")
-	rootCmd.PersistentFlags().StringVar(&geminiModel, "gemini", "", "Use Gemini via OpenCode (optionally specify model: --gemini=gemini-2.5-pro)")
-	rootCmd.PersistentFlags().StringVar(&codexModel, "codex", "", "Use OpenAI via OpenCode (optionally specify model:effort, e.g., --codex=o3:high)")
-	rootCmd.PersistentFlags().StringVar(&opencodeModel, "opencode", "", "Use any OpenCode provider (e.g., --opencode=ollama/llama3)")
+	rootCmd.PersistentFlags().StringVar(&claudeModel, "claude", "", "Use Claude CLI (optionally specify model: --claude=opus)")
+	rootCmd.PersistentFlags().StringVar(&geminiModel, "gemini", "", "Use Gemini CLI (optionally specify model: --gemini=gemini-2.5-pro)")
+	rootCmd.PersistentFlags().StringVar(&codexModel, "codex", "", "Use Codex CLI (optionally specify model:effort, e.g., --codex=o3:high)")
 
 	// Allow flags without values (--claude means use default model)
 	rootCmd.PersistentFlags().Lookup("claude").NoOptDefVal = "default"
 	rootCmd.PersistentFlags().Lookup("gemini").NoOptDefVal = "default"
 	rootCmd.PersistentFlags().Lookup("codex").NoOptDefVal = "default"
-	rootCmd.PersistentFlags().Lookup("opencode").NoOptDefVal = "default"
 
 	// Verbose flag for showing all stderr output
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show all stderr output from agents (default: only errors)")
@@ -68,9 +65,6 @@ func enabledProviders() []string {
 	if geminiModel != "" {
 		providers = append(providers, "gemini")
 	}
-	if opencodeModel != "" {
-		providers = append(providers, "opencode")
-	}
 
 	return providers
 }
@@ -78,7 +72,7 @@ func enabledProviders() []string {
 // ValidateProviders checks that at least one provider flag is specified
 func ValidateProviders() error {
 	if len(enabledProviders()) == 0 {
-		return fmt.Errorf("no provider specified. Use at least one of: --claude, --codex, --gemini, --opencode")
+		return fmt.Errorf("no provider specified. Use at least one of: --claude, --codex, --gemini")
 	}
 	return nil
 }
@@ -98,8 +92,6 @@ func getModel(provider string) string {
 		model = claudeModel
 	case "gemini":
 		model = geminiModel
-	case "opencode":
-		model = opencodeModel
 	}
 	if model == "default" {
 		return ""
@@ -123,71 +115,6 @@ func getCodexReasoningEffort() string {
 		return parts[1]
 	}
 	return ""
-}
-
-// mapClaudeModel maps Claude model aliases to OpenCode model names
-func mapClaudeModel(model string) string {
-	switch model {
-	case "opus", "claude-opus-4":
-		return "claude-opus-4"
-	case "sonnet", "claude-sonnet-4", "":
-		return "claude-sonnet-4"
-	case "haiku":
-		return "claude-haiku"
-	default:
-		return model
-	}
-}
-
-// mapCodexModel maps Codex model aliases to OpenCode model names
-func mapCodexModel(model string) string {
-	switch model {
-	case "o3", "":
-		return "o3"
-	case "o1":
-		return "o1"
-	case "gpt-4":
-		return "gpt-4"
-	default:
-		return model
-	}
-}
-
-// mapGeminiModel maps Gemini model aliases to OpenCode model names
-func mapGeminiModel(model string) string {
-	switch model {
-	case "", "gemini-2.5-pro":
-		return "gemini-2.5-pro"
-	default:
-		return model
-	}
-}
-
-// parseOpenCodeSpec parses an opencode model spec into provider, model, and variant
-// e.g., "ollama/llama3" -> ("ollama", "llama3", "")
-// e.g., "openai/o3:high" -> ("openai", "o3", "high")
-func parseOpenCodeSpec(spec string) (provider, model, variant string) {
-	if spec == "" || spec == "default" {
-		return "anthropic", "claude-sonnet-4", ""
-	}
-
-	// Check for variant suffix (e.g., ":high")
-	if idx := strings.LastIndex(spec, ":"); idx != -1 {
-		variant = spec[idx+1:]
-		spec = spec[:idx]
-	}
-
-	// Split provider/model
-	if idx := strings.Index(spec, "/"); idx != -1 {
-		provider = spec[:idx]
-		model = spec[idx+1:]
-	} else {
-		// No provider specified, assume anthropic
-		provider = "anthropic"
-		model = spec
-	}
-
-	return provider, model, variant
 }
 
 // PrimaryBackend returns the name of the primary agent backend (first enabled provider)
@@ -251,16 +178,11 @@ func CreateResilientAgent() agent.Agent {
 func createAgentByName(name, model string) agent.Agent {
 	switch name {
 	case "claude":
-		return agent.NewOpenCodeAgent("anthropic", mapClaudeModel(model), "", verbose)
-	case "codex":
-		return agent.NewOpenCodeAgent("openai", mapCodexModel(model), getCodexReasoningEffort(), verbose)
+		return agent.NewClaudeAgent(model, verbose)
 	case "gemini":
-		return agent.NewOpenCodeAgent("google", mapGeminiModel(model), "", verbose)
-	case "opencode":
-		provider, m, variant := parseOpenCodeSpec(opencodeModel)
-		return agent.NewOpenCodeAgent(provider, m, variant, verbose)
+		return agent.NewGeminiAgent(model, verbose)
 	default:
-		return agent.NewOpenCodeAgent("anthropic", "claude-sonnet-4", "", verbose)
+		return agent.NewCodexAgent(model, getCodexReasoningEffort(), verbose)
 	}
 }
 
