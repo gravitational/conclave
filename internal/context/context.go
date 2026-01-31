@@ -140,7 +140,7 @@ func (c *RepoContext) render() string {
 	// Title
 	b.WriteString("# Conclave Context\n\n")
 	b.WriteString("This file contains learned context about this repository for security auditing.\n")
-	b.WriteString("It is automatically updated by `conclave learn` and read during audits.\n\n")
+	b.WriteString("It is read during audits to improve accuracy.\n\n")
 
 	// Overview
 	b.WriteString("## Overview\n\n")
