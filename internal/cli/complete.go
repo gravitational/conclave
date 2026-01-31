@@ -66,7 +66,12 @@ func runComplete(cmd *cobra.Command, args []string) error {
 	}
 
 	display.PrintStatus("Loaded %d debate outputs", len(debates))
-	display.PrintStatus("Provider: %s", PrimaryBackend())
+	cfg := GetRuntimeConfig()
+	if cfg != nil && cfg.IsConfigured() {
+		display.PrintStatus("Provider: %s", cfg.PrimaryBackend())
+	} else {
+		display.PrintStatus("Provider: %s", PrimaryBackend())
+	}
 	fmt.Println()
 
 	// Find subsystem details
@@ -83,7 +88,13 @@ func runComplete(cmd *cobra.Command, args []string) error {
 
 	// Generate synthesis
 	prompt := generateSynthesisPrompt(p, subsystem, debates)
-	result := agent.StreamSilent(CreateAgent(), prompt, "Synthesizing findings")
+	var ag agent.Agent
+	if cfg != nil && cfg.IsConfigured() {
+		ag = cfg.CompleteAgent()
+	} else {
+		ag = CreateAgent()
+	}
+	result := agent.StreamSilent(ag, prompt, "Synthesizing findings")
 
 	// Save result
 	path, err := st.SaveResult(p.ID, completeSubsystem, result)

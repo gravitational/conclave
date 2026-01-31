@@ -74,19 +74,38 @@ func runAssess(cmd *cobra.Command, args []string) error {
 	}
 
 	display.PrintStatus("Subsystem: %s", subsystem.Name)
-	display.PrintStatus("Providers: %s", AgentBackend())
+
+	// Get runtime config and determine agents
+	cfg := GetRuntimeConfig()
+	var agents []agent.Agent
+	var promptAgent agent.Agent
+	var agentCount int
+
+	if cfg != nil && cfg.IsConfigured() {
+		display.PrintStatus("Providers: %s", cfg.AgentBackend())
+		agents = cfg.AssessAgents()
+		agentCount = len(agents)
+		promptAgent = cfg.PlanAgent()
+	} else {
+		display.PrintStatus("Providers: %s", AgentBackend())
+		agentCount = 3
+		agents = DistributeAgents(agentCount)
+		promptAgent = CreateAgent()
+	}
 	fmt.Println()
 
 	// Generate assessment prompts
-	promptGen := assess.NewPromptGenerator(CreateAgent())
-	prompts, err := promptGen.GeneratePrompts(p, subsystem)
+	promptGen := assess.NewPromptGenerator(promptAgent)
+	prompts, err := promptGen.GeneratePromptsN(p, subsystem, agentCount)
 	if err != nil {
 		return fmt.Errorf("failed to generate assessment prompts: %w", err)
 	}
 
-	// Run 3 agents with status display
-	agents := DistributeAgents(3)
-	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
+	// Build agent names
+	names := make([]string, agentCount)
+	for i := 0; i < agentCount; i++ {
+		names[i] = fmt.Sprintf("Assessor %d", i+1)
+	}
 	results := agent.StreamMultipleWithStatus(agents, prompts, names)
 
 	fmt.Println()

@@ -33,8 +33,14 @@ func (g *PromptGenerator) WithDynamicPrompts() *PromptGenerator {
 	return g
 }
 
-// GeneratePrompts creates 3 unique prompts for assessing a subsystem
+// GeneratePrompts creates unique prompts for assessing a subsystem
+// Uses default count of 3 assessors
 func (g *PromptGenerator) GeneratePrompts(plan *state.Plan, subsystem *state.Subsystem) ([]string, error) {
+	return g.GeneratePromptsN(plan, subsystem, 3)
+}
+
+// GeneratePromptsN creates n unique prompts for assessing a subsystem
+func (g *PromptGenerator) GeneratePromptsN(plan *state.Plan, subsystem *state.Subsystem, n int) ([]string, error) {
 	// Cache context generation (optimization: generate once, use in both paths)
 	var generalContext, subsystemContext string
 	if g.context != nil {
@@ -63,7 +69,7 @@ IMPORTANT: Each generated prompt MUST include instructions to:
 	// Default: use static prompts for token savings and consistency
 	if g.useDynamicPrompts {
 		// Generate prompts dynamically using the LLM
-		metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate 3 different prompts that will be given to 3 separate security review agents.
+		metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate %d different prompts that will be given to %d separate security review agents.
 
 Each prompt should instruct the agent to independently review a subsystem for security vulnerabilities.
 
@@ -76,7 +82,7 @@ Each prompt should instruct the agent to independently review a subsystem for se
 **Description:** %s
 **Interactions:** %s
 %s
-Generate 3 identical prompts for independent security reviews. Each prompt should instruct the agent to identify the SINGLE MOST CRITICAL security vulnerability in this subsystem. The agent must provide: (1) specific vulnerable code location, (2) clear attack vector explanation, (3) how to exploit it in practice, (4) what the attacker gains, and (5) severity rating with justification. If multiple issues exist, report ONLY the most severe one. Quality over quantity.
+Generate %d identical prompts for independent security reviews. Each prompt should instruct the agent to identify the SINGLE MOST CRITICAL security vulnerability in this subsystem. The agent must provide: (1) specific vulnerable code location, (2) clear attack vector explanation, (3) how to exploit it in practice, (4) what the attacker gains, and (5) severity rating with justification. If multiple issues exist, report ONLY the most severe one. Quality over quantity.
 
 CRITICAL: In each generated prompt, you MUST include the ACTUAL subsystem details:
 - Use the actual name "%s" (not a placeholder)
@@ -90,26 +96,31 @@ Output format - use exactly this format with the markers:
 <first prompt here>
 ---PROMPT2---
 <second prompt here>
----PROMPT3---
-<third prompt here>
+...
+---PROMPT%d---
+<last prompt here>
 ---END---
-`, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions, subsystem.Name, subsystem.Paths)
+`, n, n, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions, n, subsystem.Name, subsystem.Paths, n)
 
 		output, err := agent.RunAndCollect(g.agent, metaPrompt)
 		if err == nil {
-			prompts := parsePrompts(output)
-			if len(prompts) >= 3 {
-				return prompts[:3], nil
+			prompts := parsePromptsN(output, n)
+			if len(prompts) >= n {
+				return prompts[:n], nil
 			}
 		}
 		// Fall through to static prompts if dynamic generation failed
 	}
 
 	// Use static prompts (default, or fallback from dynamic)
-	return g.staticPrompts(plan, subsystem, generalContext, subsystemContext), nil
+	return g.staticPromptsN(plan, subsystem, generalContext, subsystemContext, n), nil
 }
 
 func (g *PromptGenerator) staticPrompts(plan *state.Plan, subsystem *state.Subsystem, generalContext, subsystemContext string) []string {
+	return g.staticPromptsN(plan, subsystem, generalContext, subsystemContext, 3)
+}
+
+func (g *PromptGenerator) staticPromptsN(plan *state.Plan, subsystem *state.Subsystem, generalContext, subsystemContext string, n int) []string {
 	// Build context section (using cached context passed as parameters)
 	contextSection := ""
 	if generalContext != "" {
@@ -148,29 +159,36 @@ If you find multiple issues, report ONLY the most severe one. Quality over quant
 If you find no exploitable vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked.
 `, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextSection)
 
-	// All 3 agents get the same prompt - if they converge on the same issue, that's a strong signal
-	return []string{
-		prompt,
-		prompt,
-		prompt,
+	// All n agents get the same prompt - if they converge on the same issue, that's a strong signal
+	prompts := make([]string, n)
+	for i := 0; i < n; i++ {
+		prompts[i] = prompt
 	}
+	return prompts
 }
 
 func parsePrompts(output string) []string {
+	return parsePromptsN(output, 3)
+}
+
+func parsePromptsN(output string, n int) []string {
 	var prompts []string
 
-	markers := []struct{ start, end string }{
-		{"---PROMPT1---", "---PROMPT2---"},
-		{"---PROMPT2---", "---PROMPT3---"},
-		{"---PROMPT3---", "---END---"},
-	}
+	// Build dynamic markers for n prompts
+	for i := 1; i <= n; i++ {
+		start := fmt.Sprintf("---PROMPT%d---", i)
+		var end string
+		if i < n {
+			end = fmt.Sprintf("---PROMPT%d---", i+1)
+		} else {
+			end = "---END---"
+		}
 
-	for _, m := range markers {
-		startIdx := indexOf(output, m.start)
-		endIdx := indexOf(output, m.end)
+		startIdx := indexOf(output, start)
+		endIdx := indexOf(output, end)
 
 		if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
-			prompt := output[startIdx+len(m.start) : endIdx]
+			prompt := output[startIdx+len(start) : endIdx]
 			prompts = append(prompts, trim(prompt))
 		}
 	}

@@ -3,10 +3,12 @@ package cli
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +17,13 @@ var (
 	geminiModel string
 	codexModel  string
 	verbose     bool
+	profileName string
+
+	// runtimeConfig holds the resolved configuration for this run
+	runtimeConfig *config.RuntimeConfig
+
+	// globalConfig holds the loaded config file
+	globalConfig *config.Config
 )
 
 var rootCmd = &cobra.Command{
@@ -43,8 +52,109 @@ func init() {
 	rootCmd.PersistentFlags().Lookup("gemini").NoOptDefVal = "default"
 	rootCmd.PersistentFlags().Lookup("codex").NoOptDefVal = "default"
 
+	// Profile flag for config-based model selection
+	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "Use named profile from ~/.conclave/config.yaml (default profile used if config exists)")
+
 	// Verbose flag for showing all stderr output
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show all stderr output from agents (default: only errors)")
+
+	// Initialize config on any command that needs providers
+	rootCmd.PersistentPreRunE = initConfig
+}
+
+// initConfig loads the config file and initializes runtimeConfig
+func initConfig(cmd *cobra.Command, args []string) error {
+	// Load config file (nil if doesn't exist)
+	var err error
+	globalConfig, err = config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// If CLI flags specified, they take precedence (skip profile)
+	if len(enabledProviders()) > 0 {
+		runtimeConfig = buildRuntimeConfigFromCLI()
+		return nil
+	}
+
+	// No CLI flags - try to use profile
+	if globalConfig != nil {
+		// Determine which profile to use
+		targetProfile := profileName
+		if targetProfile == "" {
+			targetProfile = "default"
+		}
+
+		profile := globalConfig.GetProfile(targetProfile)
+		if profile == nil {
+			// Profile not found
+			if profileName != "" {
+				// User explicitly requested a profile that doesn't exist
+				names := globalConfig.ProfileNames()
+				sort.Strings(names)
+				return fmt.Errorf("profile %q not found. Available profiles: %v", profileName, names)
+			}
+			// No explicit profile and no "default" - fall through to CLI validation
+		} else {
+			runtimeConfig = config.NewRuntimeConfig(profile, verbose)
+			return nil
+		}
+	} else if profileName != "" {
+		// User requested profile but no config file exists
+		return fmt.Errorf("--profile specified but no config file found at %s", config.DefaultConfigPath())
+	}
+
+	// No config or profile - runtimeConfig stays nil, will fail provider validation
+	return nil
+}
+
+// buildRuntimeConfigFromCLI creates a RuntimeConfig from CLI flags
+func buildRuntimeConfigFromCLI() *config.RuntimeConfig {
+	providers := enabledProviders()
+	if len(providers) == 0 {
+		return nil
+	}
+
+	// Use primary provider for all stages
+	primary := providers[0]
+	spec := config.ModelSpec{
+		Provider: primary,
+		Model:    getModel(primary),
+	}
+	if primary == "codex" {
+		spec.Effort = getCodexReasoningEffort()
+	}
+
+	// Build assess specs from all providers
+	var assessSpecs []config.ModelSpec
+	for _, p := range providers {
+		s := config.ModelSpec{
+			Provider: p,
+			Model:    getModel(p),
+		}
+		if p == "codex" {
+			s.Effort = getCodexReasoningEffort()
+		}
+		assessSpecs = append(assessSpecs, s)
+	}
+	// Pad to 3 if needed
+	for len(assessSpecs) < 3 {
+		assessSpecs = append(assessSpecs, spec)
+	}
+
+	return &config.RuntimeConfig{
+		Verbose: verbose,
+		Stages: config.StageConfig{
+			Plan:     spec,
+			Assess:   assessSpecs,
+			Complete: spec,
+			Convene: config.ConveneConfig{
+				SteelMan: spec,
+				Critique: spec,
+				Judge:    spec,
+			},
+		},
+	}
 }
 
 func Execute() error {
@@ -69,10 +179,15 @@ func enabledProviders() []string {
 	return providers
 }
 
-// ValidateProviders checks that at least one provider flag is specified
+// ValidateProviders checks that at least one provider flag is specified or profile is configured
 func ValidateProviders() error {
+	// If runtime config is configured via profile, we're good
+	if runtimeConfig != nil && runtimeConfig.IsConfigured() {
+		return nil
+	}
+	// Otherwise check CLI flags
 	if len(enabledProviders()) == 0 {
-		return fmt.Errorf("no provider specified. Use at least one of: --claude, --codex, --gemini")
+		return fmt.Errorf("no provider specified. Use at least one of: --claude, --codex, --gemini, or --profile")
 	}
 	return nil
 }
@@ -80,6 +195,11 @@ func ValidateProviders() error {
 // validateProvidersPreRun is a cobra PreRunE compatible version of ValidateProviders
 func validateProvidersPreRun(cmd *cobra.Command, args []string) error {
 	return ValidateProviders()
+}
+
+// GetRuntimeConfig returns the resolved runtime configuration
+func GetRuntimeConfig() *config.RuntimeConfig {
+	return runtimeConfig
 }
 
 // getModel returns the model for a provider, or empty string for default

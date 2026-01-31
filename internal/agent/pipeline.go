@@ -46,13 +46,38 @@ type FindingPipeline struct {
 type PipelineConfig struct {
 	Debate      *convene.Debate
 	Findings    []state.Perspective
-	CreateAgent func() Agent
+	CreateAgent func() Agent // Legacy fallback - used if phase-specific creators not set
 	Hub         *web.Hub             // optional, for web mode
 	Display     *display.PipelineDisplay // optional, for terminal mode
+
+	// Phase-specific agent creators (optional - falls back to CreateAgent)
+	CreateSteelManAgent func() Agent
+	CreateCritiqueAgent func() Agent
+	CreateJudgeAgent    func() Agent
 }
 
 // PipelineCallback is called when a finding changes phase
 type PipelineCallback func(findingIdx int, phase string, agent *web.AgentStatusData)
+
+// getAgentForPhase returns the appropriate agent for a pipeline phase
+func getAgentForPhase(cfg PipelineConfig, phase string) Agent {
+	switch phase {
+	case PhaseSteelMan:
+		if cfg.CreateSteelManAgent != nil {
+			return cfg.CreateSteelManAgent()
+		}
+	case PhaseCritique:
+		if cfg.CreateCritiqueAgent != nil {
+			return cfg.CreateCritiqueAgent()
+		}
+	case PhaseJudge:
+		if cfg.CreateJudgeAgent != nil {
+			return cfg.CreateJudgeAgent()
+		}
+	}
+	// Fallback to generic CreateAgent
+	return cfg.CreateAgent()
+}
 
 // agentID generates a unique agent ID for pipeline mode
 // ID = (findingIdx * 100) + phaseOffset
@@ -198,7 +223,7 @@ func runFindingPipeline(cfg PipelineConfig, findingIdx int) FindingPipeline {
 
 // runPipelinePhase runs a single phase for a finding
 func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn func() string) (AgentResult, error) {
-	ag := cfg.CreateAgent()
+	ag := getAgentForPhase(cfg, phase)
 	prompt := promptFn()
 	id := agentID(findingIdx, phase)
 	name := agentName(findingIdx, phase)

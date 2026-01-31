@@ -117,8 +117,15 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
+	// Get runtime config
+	cfg := GetRuntimeConfig()
+
 	display.PrintHeader("CONCLAVE AUDIT")
-	display.PrintStatus("Providers: %s", AgentBackend())
+	if cfg != nil && cfg.IsConfigured() {
+		display.PrintStatus("Providers: %s", cfg.AgentBackend())
+	} else {
+		display.PrintStatus("Providers: %s", AgentBackend())
+	}
 	display.PrintStatus("Target: %s", absPath)
 	if repoCtx.Exists() {
 		display.PrintStatus("Context: %s", repoCtx.Path())
@@ -129,17 +136,26 @@ func runFull(cmd *cobra.Command, args []string) error {
 		hub.SetPhase("plan", "Analyzing codebase structure")
 	}
 	display.PrintHeader("STEP 1: PLAN")
+
+	// Create plan agent
+	var planAgent agent.Agent
+	if cfg != nil && cfg.IsConfigured() {
+		planAgent = cfg.PlanAgent()
+	} else {
+		planAgent = CreateAgent()
+	}
+
 	var p *state.Plan
 	p, err = st.LoadMostRecentPlan()
 	if err != nil {
 		display.PrintStatus("Creating new plan...")
-		generator := plan.NewGenerator(CreateAgent(), st)
+		generator := plan.NewGenerator(planAgent, st)
 		var streamResult agent.StreamSilentResult
 		if hub != nil {
-			output := agent.StreamSilentWithWeb(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase", hub)
+			output := agent.StreamSilentWithWeb(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase", hub)
 			streamResult = agent.StreamSilentResult{Content: output}
 		} else {
-			streamResult = agent.StreamSilentWithError(CreateAgent(), generator.BuildPrompt(absPath), "Analyzing codebase")
+			streamResult = agent.StreamSilentWithError(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase")
 		}
 		if streamResult.Error != nil {
 			return fmt.Errorf("agent error: %w", streamResult.Error)
@@ -186,9 +202,24 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintStatus("Target subsystem: %s", subsystem.Name)
 	fmt.Println()
 
+	// Determine assess agents
+	var assessAgents []agent.Agent
+	var promptAgent agent.Agent
+	var agentCount int
+
+	if cfg != nil && cfg.IsConfigured() {
+		assessAgents = cfg.AssessAgents()
+		agentCount = len(assessAgents)
+		promptAgent = cfg.PlanAgent()
+	} else {
+		agentCount = 3
+		assessAgents = DistributeAgents(agentCount)
+		promptAgent = CreateAgent()
+	}
+
 	// Generate assessment prompts
-	promptGen := assess.NewPromptGenerator(CreateAgent()).WithContext(repoCtx)
-	prompts, err := promptGen.GeneratePrompts(p, subsystem)
+	promptGen := assess.NewPromptGenerator(promptAgent).WithContext(repoCtx)
+	prompts, err := promptGen.GeneratePromptsN(p, subsystem, agentCount)
 	if err != nil {
 		return fmt.Errorf("failed to generate prompts: %w", err)
 	}
@@ -199,9 +230,13 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	// Run 3 assessment agents
-	assessAgents := DistributeAgents(3)
-	names := []string{"Assessor 1", "Assessor 2", "Assessor 3"}
+	// Build agent names
+	names := make([]string, agentCount)
+	for i := 0; i < agentCount; i++ {
+		names[i] = fmt.Sprintf("Assessor %d", i+1)
+	}
+
+	// Run assessment agents
 	var assessResults []agent.AgentResult
 	if hub != nil {
 		assessResults = agent.StreamMultipleWithWeb(assessAgents, prompts, names, hub)
@@ -263,13 +298,24 @@ func runFull(cmd *cobra.Command, args []string) error {
 		pipelineDisplay = display.NewPipelineDisplay(n, findingLabels)
 	}
 
-	pipelineResults := agent.RunPipelinedDebate(agent.PipelineConfig{
-		Debate:      debate,
-		Findings:    findings,
-		CreateAgent: CreateAgent,
-		Hub:         hub,
-		Display:     pipelineDisplay,
-	})
+	// Build pipeline config with phase-specific creators if available
+	pipelineCfg := agent.PipelineConfig{
+		Debate:   debate,
+		Findings: findings,
+		Hub:      hub,
+		Display:  pipelineDisplay,
+	}
+
+	if cfg != nil && cfg.IsConfigured() {
+		pipelineCfg.CreateAgent = cfg.PlanAgent
+		pipelineCfg.CreateSteelManAgent = cfg.SteelManAgent
+		pipelineCfg.CreateCritiqueAgent = cfg.CritiqueAgent
+		pipelineCfg.CreateJudgeAgent = cfg.JudgeAgent
+	} else {
+		pipelineCfg.CreateAgent = CreateAgent
+	}
+
+	pipelineResults := agent.RunPipelinedDebate(pipelineCfg)
 	fmt.Println()
 
 	// Convert pipeline results for synthesis
@@ -303,11 +349,20 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	display.PrintStatus("Phase 4: Synthesis")
 	synthesisPrompt := debate.SynthesisPrompt(findings, steelMen, critiques, judges)
+
+	// Create synthesis agent
+	var synthesisAgent agent.Agent
+	if cfg != nil && cfg.IsConfigured() {
+		synthesisAgent = cfg.CompleteAgent()
+	} else {
+		synthesisAgent = CreateAgent()
+	}
+
 	var result string
 	if hub != nil {
-		result = agent.StreamSilentWithWeb(CreateAgent(), synthesisPrompt, "Synthesizing final report", hub)
+		result = agent.StreamSilentWithWeb(synthesisAgent, synthesisPrompt, "Synthesizing final report", hub)
 	} else {
-		result = agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
+		result = agent.StreamSilent(synthesisAgent, synthesisPrompt, "Synthesizing final report")
 	}
 
 	// Save result

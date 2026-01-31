@@ -120,7 +120,14 @@ func runConvene(cmd *cobra.Command, args []string) error {
 
 	n := len(findings)
 	display.PrintStatus("Valid findings: %d", n)
-	display.PrintStatus("Providers: %s", AgentBackend())
+
+	// Get runtime config for phase-specific agents
+	cfg := GetRuntimeConfig()
+	if cfg != nil && cfg.IsConfigured() {
+		display.PrintStatus("Providers: %s", cfg.AgentBackend())
+	} else {
+		display.PrintStatus("Providers: %s", AgentBackend())
+	}
 	fmt.Println()
 
 	// Create debate
@@ -142,13 +149,24 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	// Configure pipeline with terminal display
 	pipelineDisplay := display.NewPipelineDisplay(n, findingLabels)
 
-	pipelineResults := agent.RunPipelinedDebate(agent.PipelineConfig{
-		Debate:      debate,
-		Findings:    findings,
-		CreateAgent: CreateAgent,
-		Hub:         nil, // No web dashboard in convene command
-		Display:     pipelineDisplay,
-	})
+	// Build pipeline config with phase-specific creators if available
+	pipelineCfg := agent.PipelineConfig{
+		Debate:   debate,
+		Findings: findings,
+		Hub:      nil, // No web dashboard in convene command
+		Display:  pipelineDisplay,
+	}
+
+	if cfg != nil && cfg.IsConfigured() {
+		pipelineCfg.CreateAgent = cfg.PlanAgent
+		pipelineCfg.CreateSteelManAgent = cfg.SteelManAgent
+		pipelineCfg.CreateCritiqueAgent = cfg.CritiqueAgent
+		pipelineCfg.CreateJudgeAgent = cfg.JudgeAgent
+	} else {
+		pipelineCfg.CreateAgent = CreateAgent
+	}
+
+	pipelineResults := agent.RunPipelinedDebate(pipelineCfg)
 	fmt.Println()
 
 	// Convert pipeline results for synthesis
@@ -179,7 +197,14 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	// Phase 4: Synthesis
 	display.PrintStatus("Phase 4: Synthesis")
 	synthesisPrompt := debate.SynthesisPrompt(findings, steelMen, critiques, judges)
-	result := agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
+
+	var synthesisAgent agent.Agent
+	if cfg != nil && cfg.IsConfigured() {
+		synthesisAgent = cfg.CompleteAgent()
+	} else {
+		synthesisAgent = CreateAgent()
+	}
+	result := agent.StreamSilent(synthesisAgent, synthesisPrompt, "Synthesizing final report")
 
 	// Save result
 	resultPath, err := st.SaveResult(p.ID, conveneSubsystem, result)

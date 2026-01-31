@@ -54,11 +54,20 @@ func runPlan(cmd *cobra.Command, args []string) error {
 
 	display.PrintHeader("PLAN")
 	display.PrintStatus("Target: %s", absPath)
-	display.PrintStatus("Provider: %s", PrimaryBackend())
+
+	// Create agent based on runtime config or CLI flags
+	var ag agent.Agent
+	cfg := GetRuntimeConfig()
+	if cfg != nil && cfg.IsConfigured() {
+		display.PrintStatus("Provider: %s", cfg.PrimaryBackend())
+		ag = cfg.PlanAgent()
+	} else {
+		display.PrintStatus("Provider: %s", PrimaryBackend())
+		ag = CreateAgent()
+	}
 	fmt.Println()
 
 	// Generate plan
-	ag := CreateAgent()
 	generator := plan.NewGenerator(ag, st)
 	output := agent.StreamSilent(ag, generator.BuildPrompt(absPath), "Analyzing codebase")
 
