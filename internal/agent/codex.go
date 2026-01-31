@@ -11,13 +11,14 @@ import (
 
 // CodexAgent implements Agent using the Codex CLI
 type CodexAgent struct {
-	model   string
-	verbose bool
+	model           string
+	reasoningEffort string // low, medium, high, xhigh (empty = default)
+	verbose         bool
 }
 
-// NewCodexAgent creates a new Codex agent with optional model
-func NewCodexAgent(model string, verbose bool) *CodexAgent {
-	return &CodexAgent{model: model, verbose: verbose}
+// NewCodexAgent creates a new Codex agent with optional model and reasoning effort
+func NewCodexAgent(model, reasoningEffort string, verbose bool) *CodexAgent {
+	return &CodexAgent{model: model, reasoningEffort: reasoningEffort, verbose: verbose}
 }
 
 // Name returns the agent type name
@@ -25,8 +26,17 @@ func (a *CodexAgent) Name() string {
 	return "codex"
 }
 
-// Model returns the specific model being used
+// Model returns the specific model being used (includes reasoning effort if set)
 func (a *CodexAgent) Model() string {
+	if a.model == "" {
+		if a.reasoningEffort != "" {
+			return "effort=" + a.reasoningEffort
+		}
+		return ""
+	}
+	if a.reasoningEffort != "" {
+		return a.model + " (effort=" + a.reasoningEffort + ")"
+	}
 	return a.model
 }
 
@@ -45,6 +55,10 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		codexArgs := "codex exec --sandbox workspace-write --skip-git-repo-check"
 		if a.model != "" {
 			codexArgs += " --model " + a.model
+		}
+		if a.reasoningEffort != "" {
+			// Pass reasoning effort via --config flag (requires quoted string value)
+			codexArgs += fmt.Sprintf(" --config model_reasoning_effort='\"%s\"'", a.reasoningEffort)
 		}
 		codexArgs += " -"
 

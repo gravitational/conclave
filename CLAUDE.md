@@ -44,6 +44,9 @@ conclave status                       # Show analysis state
 # Additional flags
 conclave --claude run --web           # Open web dashboard for real-time monitoring
 conclave --claude run --gist          # Create secret GitHub gist of final report
+
+# Codex reasoning effort (low, medium, high, xhigh)
+conclave --codex=o3:high run          # Run with specified reasoning effort
 ```
 
 ## Architecture

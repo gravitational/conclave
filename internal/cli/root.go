@@ -36,7 +36,7 @@ func init() {
 	// String flags with optional values: --claude or --claude=opus
 	rootCmd.PersistentFlags().StringVar(&claudeModel, "claude", "", "Use Claude CLI (optionally specify model: --claude=opus)")
 	rootCmd.PersistentFlags().StringVar(&geminiModel, "gemini", "", "Use Gemini CLI (optionally specify model: --gemini=gemini-2.5-pro)")
-	rootCmd.PersistentFlags().StringVar(&codexModel, "codex", "", "Use Codex CLI (optionally specify model: --codex=o3)")
+	rootCmd.PersistentFlags().StringVar(&codexModel, "codex", "", "Use Codex CLI (optionally specify model:effort, e.g., --codex=o3:high)")
 
 	// Allow flags without values (--claude means use default model)
 	rootCmd.PersistentFlags().Lookup("claude").NoOptDefVal = "default"
@@ -96,7 +96,25 @@ func getModel(provider string) string {
 	if model == "default" {
 		return ""
 	}
+	// For codex, strip reasoning effort suffix if present (e.g., "o3:high" -> "o3")
+	if provider == "codex" && strings.Contains(model, ":") {
+		parts := strings.SplitN(model, ":", 2)
+		return parts[0]
+	}
 	return model
+}
+
+// getCodexReasoningEffort extracts reasoning effort from codex model string
+// e.g., "o3:high" -> "high", "o3" -> ""
+func getCodexReasoningEffort() string {
+	if codexModel == "" || codexModel == "default" {
+		return ""
+	}
+	if strings.Contains(codexModel, ":") {
+		parts := strings.SplitN(codexModel, ":", 2)
+		return parts[1]
+	}
+	return ""
 }
 
 // PrimaryBackend returns the name of the primary agent backend (first enabled provider)
@@ -112,7 +130,17 @@ func AgentBackend() string {
 	for i, p := range providers {
 		model := getModel(p)
 		if model != "" {
-			names[i] = fmt.Sprintf("%s (%s)", strings.Title(p), model)
+			// For codex, also show reasoning effort if set
+			if p == "codex" {
+				effort := getCodexReasoningEffort()
+				if effort != "" {
+					names[i] = fmt.Sprintf("%s (%s, effort=%s)", strings.Title(p), model, effort)
+				} else {
+					names[i] = fmt.Sprintf("%s (%s)", strings.Title(p), model)
+				}
+			} else {
+				names[i] = fmt.Sprintf("%s (%s)", strings.Title(p), model)
+			}
 		} else {
 			names[i] = strings.Title(p)
 		}
@@ -154,7 +182,7 @@ func createAgentByName(name, model string) agent.Agent {
 	case "gemini":
 		return agent.NewGeminiAgent(model, verbose)
 	default:
-		return agent.NewCodexAgent(model, verbose)
+		return agent.NewCodexAgent(model, getCodexReasoningEffort(), verbose)
 	}
 }
 

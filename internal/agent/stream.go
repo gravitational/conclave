@@ -340,7 +340,11 @@ func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) 
 
 	// Configure agents
 	for i, ag := range agents {
-		sd.SetAgent(i, names[i], ag.Name())
+		model := ""
+		if m, ok := ag.(interface{ Model() string }); ok {
+			model = m.Model()
+		}
+		sd.SetAgent(i, names[i], ag.Name(), model)
 	}
 
 	sd.Start()

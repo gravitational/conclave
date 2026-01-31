@@ -34,6 +34,7 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 type AgentStatus struct {
 	Name      string
 	Provider  string
+	Model     string // Specific model being used (optional)
 	State     string // "waiting", "running", "done", "error"
 	Activity  string // Current activity description
 	Lines     int    // Lines of output received
@@ -83,14 +84,15 @@ func NewStatusDisplay(n int, verbose bool) *StatusDisplay {
 	return sd
 }
 
-// SetAgent configures an agent's name and provider
-func (sd *StatusDisplay) SetAgent(idx int, name, provider string) {
+// SetAgent configures an agent's name, provider, and model
+func (sd *StatusDisplay) SetAgent(idx int, name, provider, model string) {
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
 
 	if status, ok := sd.agents[idx]; ok {
 		status.Name = name
 		status.Provider = provider
+		status.Model = model
 	}
 }
 
@@ -235,10 +237,13 @@ func (sd *StatusDisplay) formatStatus(status *AgentStatus, spinner string) strin
 		stateColor = ColorRed
 	}
 
-	// Build the status line
-	provider := status.Provider
-	if provider == "" {
-		provider = "..."
+	// Build the status line - show model if available, otherwise provider
+	displayName := status.Model
+	if displayName == "" {
+		displayName = status.Provider
+	}
+	if displayName == "" {
+		displayName = "..."
 	}
 
 	// Activity or state message
@@ -270,7 +275,7 @@ func (sd *StatusDisplay) formatStatus(status *AgentStatus, spinner string) strin
 	// Format: ⠋ Agent 1 [Claude]  Analyzing auth... (42 lines, 1m23s)
 	nameAndProvider := fmt.Sprintf("%s%-8s%s [%s%s%s]",
 		Bold, status.Name, Reset,
-		providerColor, provider, Reset)
+		providerColor, displayName, Reset)
 
 	// Truncate activity to fit
 	maxActivity := sd.termWidth - 45
