@@ -12,17 +12,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var refinePlan bool
+
 var planCmd = &cobra.Command{
 	Use:   "plan [path]",
 	Short: "Analyze codebase and create a plan",
 	Long: `Analyze the codebase at the given path (or current directory) and create
-a detailed plan breaking it down into subsystems for security analysis.`,
+a detailed plan breaking it down into subsystems for security analysis.
+
+Use --refine to take an existing plan and subdivide each subsystem further,
+creating a more granular plan for deeper analysis.`,
 	Args:    cobra.MaximumNArgs(1),
 	PreRunE: validateProvidersPreRun,
 	RunE:    runPlan,
 }
 
 func init() {
+	planCmd.Flags().BoolVar(&refinePlan, "refine", false, "Refine existing plan by subdividing each subsystem")
 	rootCmd.AddCommand(planCmd)
 }
 
@@ -52,7 +58,21 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
-	display.PrintHeader("PLAN")
+	// Load existing plan if refining
+	var existingPlan *state.Plan
+	if refinePlan {
+		existingPlan, err = st.LoadMostRecentPlan()
+		if err != nil {
+			return fmt.Errorf("failed to load existing plan for refinement: %w", err)
+		}
+	}
+
+	if refinePlan {
+		display.PrintHeader("REFINE PLAN")
+		display.PrintStatus("Refining: %s (%d subsystems)", existingPlan.Name, len(existingPlan.Subsystems))
+	} else {
+		display.PrintHeader("PLAN")
+	}
 	display.PrintStatus("Target: %s", absPath)
 
 	// Create agent based on runtime config or CLI flags
@@ -69,7 +89,18 @@ func runPlan(cmd *cobra.Command, args []string) error {
 
 	// Generate plan
 	generator := plan.NewGenerator(ag, st)
-	output := agent.StreamSilent(ag, generator.BuildPrompt(absPath), "Analyzing codebase")
+
+	var prompt string
+	var statusMsg string
+	if refinePlan {
+		prompt = generator.BuildRefinePrompt(existingPlan)
+		statusMsg = "Refining subsystems"
+	} else {
+		prompt = generator.BuildPrompt(absPath)
+		statusMsg = "Analyzing codebase"
+	}
+
+	output := agent.StreamSilent(ag, prompt, statusMsg)
 
 	p, err := generator.ParseAndSave(output, absPath)
 	if err != nil {
@@ -77,8 +108,13 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	display.PrintSuccess("Plan created: %s", p.Name)
-	display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
+	if refinePlan {
+		display.PrintSuccess("Plan refined: %s", p.Name)
+		display.PrintStatus("Subsystems: %d → %d", len(existingPlan.Subsystems), len(p.Subsystems))
+	} else {
+		display.PrintSuccess("Plan created: %s", p.Name)
+		display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
+	}
 	for _, sub := range p.Subsystems {
 		display.PrintStatus("  • %s", sub.Name)
 	}
