@@ -10,11 +10,13 @@ import (
 
 // ResilientAgent wraps an agent with automatic failover to other providers
 type ResilientAgent struct {
-	primary    Agent
-	fallbacks  []Agent
-	maxRetries int
-	mu         sync.Mutex
+	primary         Agent
+	fallbacks       []Agent
+	maxRetries      int
+	mu              sync.Mutex
 	failedProviders map[string]bool
+	lastUsage       Usage
+	lastAgent       Agent // The agent that successfully completed (for metadata)
 }
 
 // NewResilientAgent creates an agent that fails over to other providers on error
@@ -48,10 +50,30 @@ func (r *ResilientAgent) CurrentProvider() string {
 	return r.primary.Name() // All failed, will retry primary
 }
 
+// LastUsage returns the aggregate usage from all agent attempts
+func (r *ResilientAgent) LastUsage() Usage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastUsage
+}
+
+// LastSuccessfulAgent returns the agent that successfully completed the last run
+func (r *ResilientAgent) LastSuccessfulAgent() Agent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastAgent
+}
+
 // Run executes with automatic failover on errors
 func (r *ResilientAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)
 	errCh := make(chan error, 1)
+
+	// Reset usage tracking for this run
+	r.mu.Lock()
+	r.lastUsage = Usage{}
+	r.lastAgent = nil
+	r.mu.Unlock()
 
 	go func() {
 		defer close(output)
@@ -59,6 +81,7 @@ func (r *ResilientAgent) Run(ctx context.Context, prompt string) (<-chan string,
 
 		var lastErr error
 		var accumulatedOutput strings.Builder
+		var totalUsage Usage
 
 		// Build list of agents to try
 		agents := []Agent{r.primary}
@@ -85,9 +108,20 @@ func (r *ResilientAgent) Run(ctx context.Context, prompt string) (<-chan string,
 					prompt, accumulatedOutput.String())
 			}
 
-			success, partialOutput, err := r.tryAgent(ctx, agent, currentPrompt, output)
+			success, partialOutput, agentUsage, err := r.tryAgent(ctx, agent, currentPrompt, output)
+
+			// Accumulate usage from this attempt
+			totalUsage.InputTokens += agentUsage.InputTokens
+			totalUsage.OutputTokens += agentUsage.OutputTokens
+			totalUsage.TotalTokens += agentUsage.TotalTokens
+			totalUsage.CostUSD += agentUsage.CostUSD
 
 			if success {
+				// Store final usage and successful agent
+				r.mu.Lock()
+				r.lastUsage = totalUsage
+				r.lastAgent = agent
+				r.mu.Unlock()
 				errCh <- nil
 				return
 			}
@@ -114,6 +148,11 @@ func (r *ResilientAgent) Run(ctx context.Context, prompt string) (<-chan string,
 			}
 		}
 
+		// Store total usage even on failure
+		r.mu.Lock()
+		r.lastUsage = totalUsage
+		r.mu.Unlock()
+
 		// All agents failed
 		errCh <- fmt.Errorf("all providers failed, last error: %w", lastErr)
 	}()
@@ -121,7 +160,7 @@ func (r *ResilientAgent) Run(ctx context.Context, prompt string) (<-chan string,
 	return output, errCh
 }
 
-func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt string, output chan<- string) (success bool, partialOutput string, err error) {
+func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt string, output chan<- string) (success bool, partialOutput string, usage Usage, err error) {
 	agentOutput, agentErr := agent.Run(ctx, prompt)
 
 	var outputBuilder strings.Builder
@@ -140,12 +179,18 @@ func (r *ResilientAgent) tryAgent(ctx context.Context, agent Agent, prompt strin
 	agentError := <-agentErr
 	finalOutput := outputBuilder.String()
 
+	// Get usage if agent supports it
+	var agentUsage Usage
+	if up, ok := agent.(UsageProvider); ok {
+		agentUsage = up.LastUsage()
+	}
+
 	if agentError != nil {
-		return false, finalOutput, agentError
+		return false, finalOutput, agentUsage, agentError
 	}
 
 	// Command succeeded - trust it
-	return true, finalOutput, nil
+	return true, finalOutput, agentUsage, nil
 }
 
 func (r *ResilientAgent) markFailed(name string) {

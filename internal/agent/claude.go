@@ -12,8 +12,9 @@ import (
 
 // ClaudeAgent implements Agent using the Claude CLI
 type ClaudeAgent struct {
-	model   string
-	verbose bool
+	model     string
+	verbose   bool
+	lastUsage Usage
 }
 
 // NewClaudeAgent creates a new Claude agent with optional model
@@ -35,18 +36,48 @@ func (a *ClaudeAgent) Model() string {
 type claudeStreamEvent struct {
 	Type  string `json:"type"`
 	Event struct {
-		Type  string `json:"type"`
+		Type    string `json:"type"`
+		Message struct {
+			Usage struct {
+				InputTokens              int `json:"input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			} `json:"usage"`
+		} `json:"message"`
 		Delta struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"delta"`
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
 	} `json:"event"`
+	// For result events
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	Usage        struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	} `json:"usage"`
+}
+
+// LastUsage returns the usage from the most recent Run call
+func (a *ClaudeAgent) LastUsage() Usage {
+	return a.lastUsage
 }
 
 // Run executes a prompt using the Claude CLI
 func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-chan error) {
 	output := make(chan string, 100)
 	errCh := make(chan error, 1)
+
+	// Reset usage for this run
+	a.lastUsage = Usage{}
 
 	go func() {
 		defer close(output)
@@ -109,6 +140,10 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 
 		var textBuffer strings.Builder
 
+		// Track usage - will be populated from result event
+		var finalUsage Usage
+		var gotResultEvent bool
+
 		for scanner.Scan() {
 			line := scanner.Text()
 
@@ -123,22 +158,37 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 			// Handle different event types
 			switch event.Type {
 			case "stream_event":
-				// Check for content delta
-				if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
-					text := event.Event.Delta.Text
-					textBuffer.WriteString(text)
+				switch event.Event.Type {
+				case "content_block_delta":
+					// Check for text content
+					if event.Event.Delta.Type == "text_delta" {
+						text := event.Event.Delta.Text
+						textBuffer.WriteString(text)
 
-					// Output complete lines as they arrive
-					for {
-						content := textBuffer.String()
-						idx := strings.Index(content, "\n")
-						if idx == -1 {
-							break
+						// Output complete lines as they arrive
+						for {
+							content := textBuffer.String()
+							idx := strings.Index(content, "\n")
+							if idx == -1 {
+								break
+							}
+							output <- content[:idx]
+							textBuffer.Reset()
+							textBuffer.WriteString(content[idx+1:])
 						}
-						output <- content[:idx]
-						textBuffer.Reset()
-						textBuffer.WriteString(content[idx+1:])
 					}
+				}
+
+			case "result":
+				// Final result event has accurate usage and pre-calculated cost
+				gotResultEvent = true
+				finalUsage = Usage{
+					InputTokens:     event.Usage.InputTokens,
+					OutputTokens:    event.Usage.OutputTokens,
+					CacheReadTokens: event.Usage.CacheReadInputTokens,
+					CacheWriteTokens: event.Usage.CacheCreationInputTokens,
+					TotalTokens:     event.Usage.InputTokens + event.Usage.OutputTokens,
+					CostUSD:         event.TotalCostUSD,
 				}
 			}
 		}
@@ -146,6 +196,14 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		// Output any remaining text
 		if textBuffer.Len() > 0 {
 			output <- textBuffer.String()
+		}
+
+		// Store final usage from result event, or calculate fallback
+		if gotResultEvent {
+			a.lastUsage = finalUsage
+		} else {
+			// Fallback if no result event (shouldn't happen normally)
+			a.lastUsage = Usage{}
 		}
 
 		// Wait for stderr collection to complete

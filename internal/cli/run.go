@@ -86,6 +86,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
+	// Reset session usage tracking
+	agent.GlobalSession.Reset()
+
 	// Start web dashboard if requested
 	var hub *web.Hub
 	if useWeb {
@@ -375,6 +378,9 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintSuccess("Subsystem: %s", subsystem.Name)
 	display.PrintSuccess("Results: %s", resultPath)
 
+	// Print session usage summary
+	printSessionUsageSummary(hub)
+
 	// Create gist if requested
 	if createGist {
 		fmt.Println()
@@ -427,4 +433,65 @@ func openBrowser(url string) {
 		return
 	}
 	cmd.Start()
+}
+
+// printSessionUsageSummary prints a summary of token usage for the session
+func printSessionUsageSummary(hub *web.Hub) {
+	total := agent.GlobalSession.GetTotal()
+
+	// Skip if no usage recorded
+	if total.TotalTokens == 0 {
+		return
+	}
+
+	display.PrintHeader("SESSION USAGE")
+
+	// Print total
+	display.PrintStatus("Total: %s ($%.2f)",
+		formatTokenCount(total.TotalTokens),
+		total.CostUSD)
+
+	// Print per-agent breakdown
+	byAgent := agent.GlobalSession.GetByAgent()
+	for key, usage := range byAgent {
+		if usage.TotalTokens > 0 {
+			display.PrintStatus("  %s: %s ($%.2f)",
+				key,
+				formatTokenCount(usage.TotalTokens),
+				usage.CostUSD)
+		}
+	}
+
+	// Broadcast to web hub if available
+	if hub != nil {
+		webData := web.SessionUsageData{
+			ByAgent: make(map[string]web.UsageData),
+			Total: web.UsageData{
+				InputTokens:  total.InputTokens,
+				OutputTokens: total.OutputTokens,
+				TotalTokens:  total.TotalTokens,
+				CostUSD:      total.CostUSD,
+			},
+		}
+		for key, usage := range byAgent {
+			webData.ByAgent[key] = web.UsageData{
+				InputTokens:  usage.InputTokens,
+				OutputTokens: usage.OutputTokens,
+				TotalTokens:  usage.TotalTokens,
+				CostUSD:      usage.CostUSD,
+			}
+		}
+		hub.BroadcastSessionUsage(webData)
+	}
+}
+
+// formatTokenCount formats a token count with K/M suffixes
+func formatTokenCount(tokens int) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM tokens", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%.1fK tokens", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%d tokens", tokens)
 }

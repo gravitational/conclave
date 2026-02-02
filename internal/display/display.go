@@ -41,6 +41,14 @@ const (
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
+// Usage holds token consumption metrics for display
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	CostUSD      float64
+}
+
 // AgentStatus represents the current state of an agent
 type AgentStatus struct {
 	Name      string
@@ -52,6 +60,7 @@ type AgentStatus struct {
 	StartTime time.Time
 	EndTime   time.Time // Set when done/error
 	Error     error
+	Usage     *Usage // Token usage (optional, set when complete)
 }
 
 // StatusDisplay manages a multi-agent status display
@@ -158,6 +167,21 @@ func (sd *StatusDisplay) SetDone(idx int) {
 	if status, ok := sd.agents[idx]; ok {
 		status.State = "done"
 		status.EndTime = time.Now()
+	}
+}
+
+// SetUsage sets the token usage for an agent
+func (sd *StatusDisplay) SetUsage(idx int, inputTokens, outputTokens, totalTokens int, costUSD float64) {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+
+	if status, ok := sd.agents[idx]; ok {
+		status.Usage = &Usage{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			TotalTokens:  totalTokens,
+			CostUSD:      costUSD,
+		}
 	}
 }
 
@@ -298,17 +322,24 @@ func (sd *StatusDisplay) formatStatus(status *AgentStatus, spinner string) strin
 		activity = activity[:maxActivity-3] + "..."
 	}
 
-	lineCount := ""
+	// Build stats string: lines, tokens, cost, duration
+	var stats []string
 	if status.Lines > 0 {
-		lineCount = fmt.Sprintf("%d lines, ", status.Lines)
+		stats = append(stats, fmt.Sprintf("%d lines", status.Lines))
 	}
+	if status.Usage != nil && status.Usage.TotalTokens > 0 {
+		stats = append(stats, formatTokens(status.Usage.TotalTokens))
+		if status.Usage.CostUSD > 0 {
+			stats = append(stats, fmt.Sprintf("$%.2f", status.Usage.CostUSD))
+		}
+	}
+	stats = append(stats, duration)
 
-	return fmt.Sprintf(" %s%s%s %s  %s (%s%s)",
+	return fmt.Sprintf(" %s%s%s %s  %s (%s)",
 		stateColor, stateIndicator, Reset,
 		nameAndProvider,
 		activity,
-		lineCount,
-		duration)
+		strings.Join(stats, ", "))
 }
 
 func formatDuration(d time.Duration) string {
@@ -316,6 +347,17 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
 	return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+// formatTokens formats a token count with K/M suffixes
+func formatTokens(tokens int) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM tokens", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%.1fK tokens", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%d tokens", tokens)
 }
 
 // extractActivity tries to extract a meaningful status from output

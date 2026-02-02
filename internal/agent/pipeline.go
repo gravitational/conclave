@@ -326,6 +326,9 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 		return AgentResult{}, err
 	}
 
+	// Extract and record usage
+	usage := extractAndRecordUsage(ag)
+
 	if cfg.Hub != nil {
 		cfg.Hub.UpdateAgent(&web.AgentStatusData{
 			ID:        id,
@@ -343,6 +346,7 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 	return AgentResult{
 		Content: result.String(),
 		Agent:   GetMeta(ag),
+		Usage:   usage,
 	}, nil
 }
 

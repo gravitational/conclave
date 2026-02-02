@@ -31,6 +31,18 @@ var (
 	outputMutex sync.Mutex
 )
 
+// extractAndRecordUsage extracts usage from an agent and records it in the global session
+func extractAndRecordUsage(ag Agent) Usage {
+	var usage Usage
+	if up, ok := ag.(UsageProvider); ok {
+		usage = up.LastUsage()
+		// Add to global session
+		meta := GetMeta(ag)
+		GlobalSession.Add(meta.Provider, meta.Model, usage)
+	}
+	return usage
+}
+
 // StreamWithPrefix runs an agent and streams output with a colored prefix
 // Returns the collected output as a string
 func StreamWithPrefix(ag Agent, prompt string, prefix string, color string) string {
@@ -57,9 +69,15 @@ func StreamWithPrefix(ag Agent, prompt string, prefix string, color string) stri
 	return result.String()
 }
 
+// StreamWithStatusResult holds the result of StreamWithStatus
+type StreamWithStatusResult struct {
+	Content string
+	Usage   Usage
+}
+
 // StreamWithStatus runs an agent and updates a status display
 // Returns the collected output as a string
-func StreamWithStatus(ag Agent, prompt string, idx int, sd *display.StatusDisplay) string {
+func StreamWithStatus(ag Agent, prompt string, idx int, sd *display.StatusDisplay) StreamWithStatusResult {
 	ctx := context.Background()
 	output, errCh := ag.Run(ctx, prompt)
 
@@ -71,13 +89,21 @@ func StreamWithStatus(ag Agent, prompt string, idx int, sd *display.StatusDispla
 		sd.AddLine(idx, line)
 	}
 
+	// Extract and record usage
+	usage := extractAndRecordUsage(ag)
+
+	// Update display with usage if available
+	if !usage.IsEmpty() {
+		sd.SetUsage(idx, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CostUSD)
+	}
+
 	if err := <-errCh; err != nil {
 		sd.SetError(idx, err)
-		return result.String()
+		return StreamWithStatusResult{Content: result.String(), Usage: usage}
 	}
 
 	sd.SetDone(idx)
-	return result.String()
+	return StreamWithStatusResult{Content: result.String(), Usage: usage}
 }
 
 // StreamWithWeb runs an agent and sends updates to web hub
@@ -133,6 +159,9 @@ func StreamWithWeb(ag Agent, prompt string, idx int, name string, hub *web.Hub) 
 		})
 	}
 
+	// Extract and record usage
+	extractAndRecordUsage(ag)
+
 	endTime := time.Now()
 	if err := <-errCh; err != nil {
 		errStr := err.Error()
@@ -170,6 +199,7 @@ func StreamWithWeb(ag Agent, prompt string, idx int, name string, hub *web.Hub) 
 type StreamSilentResult struct {
 	Content string
 	Error   error
+	Usage   Usage
 }
 
 // StreamSilent runs an agent and collects output without displaying
@@ -201,13 +231,16 @@ func StreamSilentWithError(ag Agent, prompt string, description string) StreamSi
 		}
 	}
 
+	// Extract and record usage
+	usage := extractAndRecordUsage(ag)
+
 	if err := <-errCh; err != nil {
 		fmt.Printf("\r  %s... %s✗%s\n", description, ColorRed, ColorReset)
-		return StreamSilentResult{Content: result.String(), Error: err}
+		return StreamSilentResult{Content: result.String(), Error: err, Usage: usage}
 	}
 
 	fmt.Printf("\r  %s... %s✓%s (%d lines)\n", description, ColorGreen, ColorReset, lineCount)
-	return StreamSilentResult{Content: result.String(), Error: nil}
+	return StreamSilentResult{Content: result.String(), Error: nil, Usage: usage}
 }
 
 // StreamSilentWithWeb runs an agent silently but sends updates to web hub
@@ -265,6 +298,9 @@ func StreamSilentWithWeb(ag Agent, prompt string, description string, hub *web.H
 			})
 		}
 	}
+
+	// Extract and record usage
+	extractAndRecordUsage(ag)
 
 	endTime := time.Now()
 	if err := <-errCh; err != nil {
@@ -354,10 +390,11 @@ func StreamMultipleWithStatus(agents []Agent, prompts []string, names []string) 
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			content := StreamWithStatus(agents[idx], prompts[idx], idx, sd)
+			res := StreamWithStatus(agents[idx], prompts[idx], idx, sd)
 			results[idx] = AgentResult{
-				Content: content,
+				Content: res.Content,
 				Agent:   GetMeta(agents[idx]),
+				Usage:   res.Usage,
 			}
 		}(i)
 	}
@@ -414,10 +451,11 @@ func StreamMultipleWithWeb(agents []Agent, prompts []string, names []string, hub
 		go func(idx int) {
 			defer wg.Done()
 			defer GlobalRegistry.Unregister(idx)
-			content := StreamWithWebCtx(contexts[idx], agents[idx], prompts[idx], idx, names[idx], hub)
+			res := StreamWithWebCtx(contexts[idx], agents[idx], prompts[idx], idx, names[idx], hub)
 			results[idx] = AgentResult{
-				Content: content,
+				Content: res.Content,
 				Agent:   GetMeta(agents[idx]),
+				Usage:   res.Usage,
 			}
 		}(i)
 	}
@@ -426,8 +464,14 @@ func StreamMultipleWithWeb(agents []Agent, prompts []string, names []string, hub
 	return results
 }
 
+// StreamWithWebCtxResult holds results from StreamWithWebCtx
+type StreamWithWebCtxResult struct {
+	Content string
+	Usage   Usage
+}
+
 // StreamWithWebCtx runs an agent with context and sends updates to web hub
-func StreamWithWebCtx(ctx context.Context, ag Agent, prompt string, idx int, name string, hub *web.Hub) string {
+func StreamWithWebCtx(ctx context.Context, ag Agent, prompt string, idx int, name string, hub *web.Hub) StreamWithWebCtxResult {
 	output, errCh := ag.Run(ctx, prompt)
 
 	var result strings.Builder
@@ -478,6 +522,9 @@ func StreamWithWebCtx(ctx context.Context, ag Agent, prompt string, idx int, nam
 		})
 	}
 
+	// Extract and record usage
+	usage := extractAndRecordUsage(ag)
+
 	endTime := time.Now()
 	if err := <-errCh; err != nil {
 		// Check if this was a cancellation (kill)
@@ -499,7 +546,7 @@ func StreamWithWebCtx(ctx context.Context, ag Agent, prompt string, idx int, nam
 			EndTime:   &endTime,
 			Error:     errStr,
 		})
-		return result.String()
+		return StreamWithWebCtxResult{Content: result.String(), Usage: usage}
 	}
 
 	hub.UpdateAgent(&web.AgentStatusData{
@@ -514,7 +561,7 @@ func StreamWithWebCtx(ctx context.Context, ag Agent, prompt string, idx int, nam
 		EndTime:   &endTime,
 	})
 
-	return result.String()
+	return StreamWithWebCtxResult{Content: result.String(), Usage: usage}
 }
 
 // extractActivity extracts meaningful activity from a log line

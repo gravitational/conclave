@@ -58,6 +58,9 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize state: %w", err)
 	}
 
+	// Reset session usage tracking
+	agent.GlobalSession.Reset()
+
 	// Load existing plan if refining
 	var existingPlan *state.Plan
 	if refinePlan {
@@ -121,5 +124,36 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	display.PrintSuccess("Saved: %s", st.PlanPath(p.ID, p.Slug()))
 
+	// Print session usage summary
+	printPlanUsageSummary()
+
 	return nil
+}
+
+// printPlanUsageSummary prints a summary of token usage for the plan command
+func printPlanUsageSummary() {
+	total := agent.GlobalSession.GetTotal()
+
+	// Skip if no usage recorded
+	if total.TotalTokens == 0 && total.CostUSD == 0 {
+		return
+	}
+
+	fmt.Println()
+	// Show basic usage
+	if total.TotalTokens > 0 {
+		display.PrintStatus("Usage: %s ($%.2f)",
+			formatTokenCount(total.TotalTokens),
+			total.CostUSD)
+	} else if total.CostUSD > 0 {
+		// Cost recorded but no token count (shouldn't happen normally)
+		display.PrintStatus("Usage: $%.2f", total.CostUSD)
+	}
+
+	// Show cache breakdown if significant
+	if total.CacheReadTokens > 0 || total.CacheWriteTokens > 0 {
+		display.PrintStatus("  Cache: %s read, %s created",
+			formatTokenCount(total.CacheReadTokens),
+			formatTokenCount(total.CacheWriteTokens))
+	}
 }

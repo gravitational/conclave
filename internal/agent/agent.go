@@ -35,10 +35,11 @@ func GetMeta(ag Agent) AgentMeta {
 	return meta
 }
 
-// AgentResult pairs output content with agent metadata
+// AgentResult pairs output content with agent metadata and usage
 type AgentResult struct {
 	Content string
 	Agent   AgentMeta
+	Usage   Usage
 }
 
 // RunAndCollect runs a prompt and collects all output into a single string

@@ -21,6 +21,7 @@ const (
 	MsgCommandAck     MessageType = "command_ack"
 	MsgPipelineStart  MessageType = "pipeline_start"
 	MsgFindingUpdate  MessageType = "finding_update"
+	MsgSessionUsage   MessageType = "session_usage"
 )
 
 // CommandData holds a control command from the frontend
@@ -49,18 +50,33 @@ type Message struct {
 	Data      interface{} `json:"data"`
 }
 
+// UsageData holds token usage metrics for web display
+type UsageData struct {
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
+	TotalTokens  int     `json:"totalTokens"`
+	CostUSD      float64 `json:"costUsd,omitempty"`
+}
+
 // AgentStatusData holds agent status info
 type AgentStatusData struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model,omitempty"`
-	State     string    `json:"state"` // waiting, running, done, error
-	Activity  string    `json:"activity"`
-	Lines     int       `json:"lines"`
-	StartTime time.Time `json:"startTime"`
+	ID        int        `json:"id"`
+	Name      string     `json:"name"`
+	Provider  string     `json:"provider"`
+	Model     string     `json:"model,omitempty"`
+	State     string     `json:"state"` // waiting, running, done, error
+	Activity  string     `json:"activity"`
+	Lines     int        `json:"lines"`
+	StartTime time.Time  `json:"startTime"`
 	EndTime   *time.Time `json:"endTime,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	Usage     *UsageData `json:"usage,omitempty"`
+}
+
+// SessionUsageData holds aggregate session usage for broadcasting
+type SessionUsageData struct {
+	ByAgent map[string]UsageData `json:"byAgent"`
+	Total   UsageData            `json:"total"`
 }
 
 // AgentLogData holds a log line from an agent
@@ -593,6 +609,15 @@ func (h *Hub) IsPipelineMode() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.pipelineMode
+}
+
+// BroadcastSessionUsage sends session-level usage data to all clients
+func (h *Hub) BroadcastSessionUsage(data SessionUsageData) {
+	h.Broadcast(Message{
+		Type:      MsgSessionUsage,
+		Timestamp: time.Now(),
+		Data:      data,
+	})
 }
 
 // ExitPipelineMode clears pipeline mode state
