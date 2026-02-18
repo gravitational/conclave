@@ -236,6 +236,11 @@ func StreamSilentWithError(ag Agent, prompt string, description string) StreamSi
 
 	if err := <-errCh; err != nil {
 		fmt.Printf("\r  %s... %s✗%s\n", description, ColorRed, ColorReset)
+		for _, line := range strings.Split(err.Error(), "\n") {
+			if strings.TrimSpace(line) != "" {
+				fmt.Printf("  %s%s%s\n", ColorRed, line, ColorReset)
+			}
+		}
 		return StreamSilentResult{Content: result.String(), Error: err, Usage: usage}
 	}
 

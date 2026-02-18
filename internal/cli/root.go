@@ -39,6 +39,8 @@ The workflow consists of:
   4. complete - Synthesize final results
 
 You must specify at least one provider: --claude, --codex, or --gemini`,
+	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 func init() {

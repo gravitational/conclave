@@ -64,6 +64,11 @@ type claudeStreamEvent struct {
 		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
+	// For error events
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 // LastUsage returns the usage from the most recent Run call
@@ -177,6 +182,14 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 							textBuffer.WriteString(content[idx+1:])
 						}
 					}
+				}
+
+			case "error":
+				// Capture error message from stream (e.g. auth errors) for diagnostics
+				if event.Error.Message != "" {
+					stderrMu.Lock()
+					stderrLines = append(stderrLines, event.Error.Message)
+					stderrMu.Unlock()
 				}
 
 			case "result":
