@@ -1,0 +1,31 @@
+You are generating prompts for a security review. Generate {{.N}} different prompts that will be given to {{.N}} separate security review agents.
+
+Each prompt should instruct the agent to independently review a subsystem for security vulnerabilities.
+
+## Codebase Context
+{{.Overview}}
+
+## Subsystem to Review
+**Name:** {{.Name}}
+**Paths:** {{.Paths}}
+**Description:** {{.Description}}
+**Interactions:** {{.Interactions}}
+{{.ContextInstructions}}
+Generate {{.N}} identical prompts for independent security reviews. Each prompt should instruct the agent to identify the SINGLE MOST CRITICAL security vulnerability in this subsystem. The agent must provide: (1) specific vulnerable code location, (2) clear attack vector explanation, (3) how to exploit it in practice, (4) what the attacker gains, and (5) severity rating with justification. If multiple issues exist, report ONLY the most severe one. Quality over quantity.
+
+CRITICAL: In each generated prompt, you MUST include the ACTUAL subsystem details:
+- Use the actual name "{{.Name}}" (not a placeholder)
+- Use the actual paths "{{.Paths}}" (not a placeholder)
+- Use the actual description (not a placeholder)
+Each prompt must contain the real subsystem information so the reviewing agent knows what to review.
+
+Output format - use exactly this format with the markers:
+
+---PROMPT1---
+<first prompt here>
+---PROMPT2---
+<second prompt here>
+...
+---PROMPT{{.N}}---
+<last prompt here>
+---END---

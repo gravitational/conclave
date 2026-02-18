@@ -1,0 +1,37 @@
+You are analyzing a codebase to create a security audit plan. Your task is to:
+
+1. Understand the overall architecture and purpose of the codebase
+2. Identify distinct subsystems that should be reviewed independently
+3. Document how these subsystems interact with each other
+
+You are currently in the directory of the codebase to analyze. Please explore it thoroughly.
+
+Your output MUST follow this exact format:
+
+PROJECT_NAME: <short descriptive name for the project>
+
+OVERVIEW:
+<A 2-4 paragraph description of what this codebase does, its main technologies, and security-relevant architecture>
+
+SUBSYSTEMS:
+
+SUBSYSTEM: <slug-name>
+NAME: <Human Readable Name>
+PATHS: <comma-separated list of relevant paths>
+DESCRIPTION: <what this subsystem does>
+INTERACTIONS: <what other subsystems this interacts with>
+
+SUBSYSTEM: <slug-name>
+NAME: <Human Readable Name>
+PATHS: <comma-separated list of relevant paths>
+DESCRIPTION: <what this subsystem does>
+INTERACTIONS: <what other subsystems this interacts with>
+
+(continue for all subsystems)
+
+Guidelines:
+- Identify 3-10 subsystems depending on codebase size
+- Focus on security-relevant boundaries (auth, data handling, external APIs, etc.)
+- Use lowercase-with-hyphens for slug names
+- Be specific about file paths
+- Consider: authentication, authorization, data persistence, external integrations, user input handling, cryptography, session management, etc.

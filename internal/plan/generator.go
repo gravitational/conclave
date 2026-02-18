@@ -7,47 +7,9 @@ import (
 	"time"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
+	"github.com/rob-picard-teleport/conclave/internal/prompts"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
-
-const planPrompt = `You are analyzing a codebase to create a security audit plan. Your task is to:
-
-1. Understand the overall architecture and purpose of the codebase
-2. Identify distinct subsystems that should be reviewed independently
-3. Document how these subsystems interact with each other
-
-You are currently in the directory of the codebase to analyze. Please explore it thoroughly.
-
-Your output MUST follow this exact format:
-
-PROJECT_NAME: <short descriptive name for the project>
-
-OVERVIEW:
-<A 2-4 paragraph description of what this codebase does, its main technologies, and security-relevant architecture>
-
-SUBSYSTEMS:
-
-SUBSYSTEM: <slug-name>
-NAME: <Human Readable Name>
-PATHS: <comma-separated list of relevant paths>
-DESCRIPTION: <what this subsystem does>
-INTERACTIONS: <what other subsystems this interacts with>
-
-SUBSYSTEM: <slug-name>
-NAME: <Human Readable Name>
-PATHS: <comma-separated list of relevant paths>
-DESCRIPTION: <what this subsystem does>
-INTERACTIONS: <what other subsystems this interacts with>
-
-(continue for all subsystems)
-
-Guidelines:
-- Identify 3-10 subsystems depending on codebase size
-- Focus on security-relevant boundaries (auth, data handling, external APIs, etc.)
-- Use lowercase-with-hyphens for slug names
-- Be specific about file paths
-- Consider: authentication, authorization, data persistence, external integrations, user input handling, cryptography, session management, etc.
-`
 
 // Generator creates analysis plans
 type Generator struct {
@@ -65,71 +27,23 @@ func NewGenerator(ag agent.Agent, st *state.State) *Generator {
 
 // BuildPrompt returns the prompt for plan generation
 func (g *Generator) BuildPrompt(codebasePath string) string {
-	return planPrompt
+	return prompts.Plan
 }
 
 // BuildRefinePrompt returns the prompt for refining an existing plan
 func (g *Generator) BuildRefinePrompt(existingPlan *state.Plan) string {
 	var sb strings.Builder
-
-	sb.WriteString(`You are refining an existing security audit plan by subdividing each subsystem into more granular parts.
-
-EXISTING PLAN:
-Project: `)
-	sb.WriteString(existingPlan.Name)
-	sb.WriteString("\n\nOverview:\n")
-	sb.WriteString(existingPlan.Overview)
-	sb.WriteString("\n\nCurrent Subsystems:\n")
-
 	for _, sub := range existingPlan.Subsystems {
 		sb.WriteString(fmt.Sprintf("\n- %s (%s)\n", sub.Name, sub.Slug))
 		sb.WriteString(fmt.Sprintf("  Paths: %s\n", sub.Paths))
 		sb.WriteString(fmt.Sprintf("  Description: %s\n", sub.Description))
 	}
 
-	sb.WriteString(`
-
-YOUR TASK:
-Subdivide EACH of the existing subsystems into 2-3 smaller, more focused subsystems.
-This will create a more granular plan for deeper security analysis.
-
-For example, if a subsystem covers "Authentication", you might split it into:
-- auth-login (login flow, credential validation)
-- auth-session (session management, tokens)
-- auth-password (password reset, password policies)
-
-You are currently in the directory of the codebase. Explore it to understand how to best subdivide each subsystem.
-
-Your output MUST follow this exact format:
-
-PROJECT_NAME: `)
-	sb.WriteString(existingPlan.Name)
-	sb.WriteString(`
-
-OVERVIEW:
-`)
-	sb.WriteString(existingPlan.Overview)
-	sb.WriteString(`
-
-SUBSYSTEMS:
-
-SUBSYSTEM: <slug-name>
-NAME: <Human Readable Name>
-PATHS: <comma-separated list of relevant paths>
-DESCRIPTION: <what this subsystem does>
-INTERACTIONS: <what other subsystems this interacts with>
-
-(continue for all new subsystems - aim for roughly 2-3x the current count)
-
-Guidelines:
-- Subdivide each original subsystem into 2-3 more focused parts
-- Use slug names that indicate the parent subsystem (e.g., auth-login, auth-session)
-- Be specific about file paths for each new subsystem
-- Maintain security focus - split along security-relevant boundaries
-- Keep the same output format as the original plan
-`)
-
-	return sb.String()
+	return prompts.Render(prompts.PlanRefine, map[string]any{
+		"Name":            existingPlan.Name,
+		"Overview":        existingPlan.Overview,
+		"SubsystemsList":  sb.String(),
+	})
 }
 
 // ParseAndSave parses agent output and saves the plan
@@ -148,7 +62,7 @@ func (g *Generator) ParseAndSave(output string, codebasePath string) (*state.Pla
 
 // Generate creates a new plan for the given codebase path
 func (g *Generator) Generate(codebasePath string) (*state.Plan, error) {
-	output := agent.StreamWithPrefix(g.agent, planPrompt, "Planner", agent.ColorCyan)
+	output := agent.StreamWithPrefix(g.agent, prompts.Plan, "Planner", agent.ColorCyan)
 	return g.ParseAndSave(output, codebasePath)
 }
 

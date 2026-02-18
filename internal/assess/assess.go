@@ -5,6 +5,7 @@ import (
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/context"
+	"github.com/rob-picard-teleport/conclave/internal/prompts"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
@@ -68,45 +69,21 @@ IMPORTANT: Each generated prompt MUST include instructions to:
 	// Use dynamic prompt generation only if explicitly enabled (opt-in)
 	// Default: use static prompts for token savings and consistency
 	if g.useDynamicPrompts {
-		// Generate prompts dynamically using the LLM
-		metaPrompt := fmt.Sprintf(`You are generating prompts for a security review. Generate %d different prompts that will be given to %d separate security review agents.
-
-Each prompt should instruct the agent to independently review a subsystem for security vulnerabilities.
-
-## Codebase Context
-%s
-
-## Subsystem to Review
-**Name:** %s
-**Paths:** %s
-**Description:** %s
-**Interactions:** %s
-%s
-Generate %d identical prompts for independent security reviews. Each prompt should instruct the agent to identify the SINGLE MOST CRITICAL security vulnerability in this subsystem. The agent must provide: (1) specific vulnerable code location, (2) clear attack vector explanation, (3) how to exploit it in practice, (4) what the attacker gains, and (5) severity rating with justification. If multiple issues exist, report ONLY the most severe one. Quality over quantity.
-
-CRITICAL: In each generated prompt, you MUST include the ACTUAL subsystem details:
-- Use the actual name "%s" (not a placeholder)
-- Use the actual paths "%s" (not a placeholder)
-- Use the actual description (not a placeholder)
-Each prompt must contain the real subsystem information so the reviewing agent knows what to review.
-
-Output format - use exactly this format with the markers:
-
----PROMPT1---
-<first prompt here>
----PROMPT2---
-<second prompt here>
-...
----PROMPT%d---
-<last prompt here>
----END---
-`, n, n, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextInstructions, n, subsystem.Name, subsystem.Paths, n)
+		metaPrompt := prompts.Render(prompts.AssessDynamic, map[string]any{
+			"N":                   n,
+			"Overview":            plan.Overview,
+			"Name":                subsystem.Name,
+			"Paths":               subsystem.Paths,
+			"Description":         subsystem.Description,
+			"Interactions":        subsystem.Interactions,
+			"ContextInstructions": contextInstructions,
+		})
 
 		output, err := agent.RunAndCollect(g.agent, metaPrompt)
 		if err == nil {
-			prompts := parsePromptsN(output, n)
-			if len(prompts) >= n {
-				return prompts[:n], nil
+			parsed := parsePromptsN(output, n)
+			if len(parsed) >= n {
+				return parsed[:n], nil
 			}
 		}
 		// Fall through to static prompts if dynamic generation failed
@@ -121,7 +98,6 @@ func (g *PromptGenerator) staticPrompts(plan *state.Plan, subsystem *state.Subsy
 }
 
 func (g *PromptGenerator) staticPromptsN(plan *state.Plan, subsystem *state.Subsystem, generalContext, subsystemContext string, n int) []string {
-	// Build context section (using cached context passed as parameters)
 	contextSection := ""
 	if generalContext != "" {
 		contextSection += "\n" + generalContext + "\n"
@@ -130,41 +106,21 @@ func (g *PromptGenerator) staticPromptsN(plan *state.Plan, subsystem *state.Subs
 		contextSection += "\n" + subsystemContext + "\n"
 	}
 
-	prompt := fmt.Sprintf(`You are a senior security researcher conducting a thorough security review.
-
-## Codebase Context
-%s
-
-## Subsystem Under Review
-**Name:** %s
-**Paths:** %s
-**Description:** %s
-**Interactions:** %s
-%s
-## Your Task
-
-Conduct an independent security review of this subsystem. Explore the code thoroughly.
-
-Your task: Identify the SINGLE MOST CRITICAL security vulnerability in this subsystem.
-
-You must provide:
-1. The specific vulnerable code location (file and line)
-2. A clear explanation of the attack vector
-3. How an attacker would exploit this in practice
-4. What the attacker gains (data theft, privilege escalation, etc.)
-5. Severity rating (Critical/High/Medium) with justification
-
-If you find multiple issues, report ONLY the most severe one. Quality over quantity.
-
-If you find no exploitable vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked.
-`, plan.Overview, subsystem.Name, subsystem.Paths, subsystem.Description, subsystem.Interactions, contextSection)
+	prompt := prompts.Render(prompts.Assess, map[string]any{
+		"Overview":       plan.Overview,
+		"Name":           subsystem.Name,
+		"Paths":          subsystem.Paths,
+		"Description":    subsystem.Description,
+		"Interactions":   subsystem.Interactions,
+		"ContextSection": contextSection,
+	})
 
 	// All n agents get the same prompt - if they converge on the same issue, that's a strong signal
-	prompts := make([]string, n)
+	result := make([]string, n)
 	for i := 0; i < n; i++ {
-		prompts[i] = prompt
+		result[i] = prompt
 	}
-	return prompts
+	return result
 }
 
 func parsePrompts(output string) []string {
@@ -172,7 +128,7 @@ func parsePrompts(output string) []string {
 }
 
 func parsePromptsN(output string, n int) []string {
-	var prompts []string
+	var parsed []string
 
 	// Build dynamic markers for n prompts
 	for i := 1; i <= n; i++ {
@@ -189,11 +145,11 @@ func parsePromptsN(output string, n int) []string {
 
 		if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
 			prompt := output[startIdx+len(start) : endIdx]
-			prompts = append(prompts, trim(prompt))
+			parsed = append(parsed, trimWhitespace(prompt))
 		}
 	}
 
-	return prompts
+	return parsed
 }
 
 func indexOf(s, substr string) int {
@@ -205,8 +161,7 @@ func indexOf(s, substr string) int {
 	return -1
 }
 
-func trim(s string) string {
-	// Trim whitespace
+func trimWhitespace(s string) string {
 	start := 0
 	end := len(s)
 	for start < end && (s[start] == ' ' || s[start] == '\n' || s[start] == '\t' || s[start] == '\r') {

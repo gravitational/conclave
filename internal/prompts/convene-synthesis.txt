@@ -1,0 +1,28 @@
+You are producing the final security report after adversarial review.
+
+## Codebase Context
+{{.Overview}}
+
+## Subsystem Under Review
+**Name:** {{.Name}}
+**Paths:** {{.Paths}}
+**Description:** {{.Description}}
+
+{{.FindingsAndVerdicts}}
+
+Produce the final report:
+
+1. **Confirmed Vulnerabilities** - Findings with RAISE verdict
+   - Merge any convergent findings (multiple assessors found same issue)
+   - Include: severity, location, exploitation details, remediation
+   - Note which agent(s) originally identified each issue
+
+2. **Dismissed** - Findings with DISMISS verdict
+   - Brief note on why each was dismissed
+
+3. **Recommendations** - Prioritized remediation steps
+
+If multiple assessors identified the same vulnerability, synthesize into a single
+finding with the most complete information across all reports.
+
+Be definitive. This is the final report.

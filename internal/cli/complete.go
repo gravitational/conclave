@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/display"
+	"github.com/rob-picard-teleport/conclave/internal/prompts"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -109,48 +111,16 @@ func runComplete(cmd *cobra.Command, args []string) error {
 }
 
 func generateSynthesisPrompt(p *state.Plan, subsystem *state.Subsystem, debates []string) string {
-	prompt := fmt.Sprintf(`You are a senior security researcher synthesizing findings from a multi-agent security review.
-
-## Codebase Context
-%s
-
-## Subsystem Under Review
-**Name:** %s
-**Paths:** %s
-**Description:** %s
-
-## Debate Outputs from Security Review Agents
-
-`, p.Overview, subsystem.Name, subsystem.Paths, subsystem.Description)
-
+	var sb strings.Builder
 	for i, debate := range debates {
-		prompt += fmt.Sprintf("### Debater %d's Analysis\n%s\n\n", i+1, debate)
+		sb.WriteString(fmt.Sprintf("### Debater %d's Analysis\n%s\n\n", i+1, debate))
 	}
 
-	prompt += `## Your Task
-
-Review all the debate outputs above and synthesize them into a final security report with the following sections:
-
-1. **Confirmed Vulnerabilities** - Issues the reviewers agreed are real and exploitable
-   - Include severity, specific code locations, and exploitation details
-   - For each finding, note which debaters identified it (e.g., "Found by: Debater 1, Debater 2")
-
-2. **Disputed/Unclear** - Issues where debaters disagreed
-   - Note the disagreement (e.g., "Debater 1 found this; Debater 3 disputed")
-   - Include the reasoning from both sides
-
-3. **Dismissed** - Issues determined to be false positives or non-exploitable
-   - Note which debater(s) initially raised them and why they were dismissed
-
-4. **Agent Comparison Summary**
-   - Briefly summarize each debater's approach and key findings
-   - Note any patterns in what each debater focused on
-   - Highlight areas of agreement and disagreement
-
-5. **Recommendations** - Prioritized remediation steps
-
-Prioritize quality over quantity. Only include findings that have strong evidence and are actionable.
-Do NOT include theoretical issues or best-practice violations unless they represent real security risks.`
-
-	return prompt
+	return prompts.Render(prompts.Complete, map[string]any{
+		"Overview":     p.Overview,
+		"Name":         subsystem.Name,
+		"Paths":        subsystem.Paths,
+		"Description":  subsystem.Description,
+		"DebateOutputs": sb.String(),
+	})
 }
