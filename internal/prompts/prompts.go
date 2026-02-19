@@ -15,9 +15,6 @@ var PlanRefine string
 //go:embed assess.txt
 var Assess string
 
-//go:embed assess-dynamic.txt
-var AssessDynamic string
-
 //go:embed convene-steelman.txt
 var ConveneSteelMan string
 

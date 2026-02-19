@@ -78,24 +78,21 @@ func runAssess(cmd *cobra.Command, args []string) error {
 	// Get runtime config and determine agents
 	cfg := GetRuntimeConfig()
 	var agents []agent.Agent
-	var promptAgent agent.Agent
 	var agentCount int
 
 	if cfg != nil && cfg.IsConfigured() {
 		display.PrintStatus("Providers: %s", cfg.AgentBackend())
 		agents = cfg.AssessAgents()
 		agentCount = len(agents)
-		promptAgent = cfg.PlanAgent()
 	} else {
 		display.PrintStatus("Providers: %s", AgentBackend())
 		agentCount = 3
 		agents = DistributeAgents(agentCount)
-		promptAgent = CreateAgent()
 	}
 	fmt.Println()
 
 	// Generate assessment prompts
-	promptGen := assess.NewPromptGenerator(promptAgent)
+	promptGen := assess.NewPromptGenerator()
 	prompts, err := promptGen.GeneratePromptsN(p, subsystem, agentCount)
 	if err != nil {
 		return fmt.Errorf("failed to generate assessment prompts: %w", err)
