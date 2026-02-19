@@ -15,13 +15,55 @@ Conduct an independent security review of this subsystem. Explore the code thoro
 
 Your task: Identify the SINGLE MOST CRITICAL security vulnerability in this subsystem.
 
-You must provide:
+## Parallel Logic Analysis
+
+Pay special attention to parallel or duplicate implementations of the same logic. These are a rich source of exploitable bugs. Specifically look for:
+
+- **Duplicate validation/authorization paths**: The same check (auth, permissions, input validation, access control) implemented in multiple places. One path may enforce constraints the other misses.
+- **Client-side vs server-side logic**: Where business rules, validation, or access control exist in both frontend and backend code, the server-side version may be weaker or missing checks the client enforces.
+- **Multiple API endpoints for the same operation**: Different routes or controllers that achieve the same effect (e.g., REST vs GraphQL, v1 vs v2, admin vs user-facing) where one is less hardened.
+- **Redundant data processing pipelines**: The same data being parsed, sanitized, or transformed in multiple code paths — differences in sanitization can create injection vectors.
+- **Replicated state machines or workflow logic**: Where a state transition or workflow is enforced in more than one place, inconsistencies can allow illegal state transitions.
+
+When you find parallel implementations, diff them carefully. The vulnerability is in the *gap* between them — the check one path enforces but the other does not.
+
+**We are ONLY interested in Critical and High severity findings. Do NOT report Medium, Low, or Informational issues.**
+
+## Severity Definitions
+
+**Critical** — An attacker can achieve ANY of the following with minimal preconditions:
+- Remote code execution (RCE)
+- Authentication bypass granting access to any account
+- Full database compromise (e.g. SQL injection yielding all data)
+- Complete privilege escalation from unprivileged to admin/root
+- Unrestricted file read/write on the server (path traversal to sensitive files)
+
+**High** — An attacker can achieve ANY of the following:
+- Stored XSS that executes in other users' sessions
+- IDOR/broken access control exposing other users' sensitive data
+- Server-Side Request Forgery (SSRF) reaching internal services
+- Credential leakage (hardcoded secrets, tokens in logs, exposed API keys)
+- Insecure deserialization with a viable gadget chain
+- Second-order injection (SQL, command, template) with a realistic trigger
+
+**NOT Critical or High** (do not report these):
+- Self-XSS, reflected XSS requiring unlikely user interaction
+- Missing rate limiting, CSRF tokens, or security headers
+- Denial of service without data exposure
+- Information disclosure of non-sensitive data (stack traces, version numbers)
+- Theoretical vulnerabilities that require access an attacker wouldn't have
+- Best-practice violations that are not directly exploitable
+- Missing input validation without a demonstrated exploit path
+
+## Required Output
+
+If you find a Critical or High vulnerability, provide:
 1. The specific vulnerable code location (file and line)
 2. A clear explanation of the attack vector
-3. How an attacker would exploit this in practice
-4. What the attacker gains (data theft, privilege escalation, etc.)
-5. Severity rating (Critical/High/Medium) with justification
+3. A concrete, step-by-step exploitation scenario — not theoretical, but how an attacker would actually do it
+4. What the attacker gains (data theft, privilege escalation, RCE, etc.)
+5. Severity rating (Critical or High) with justification referencing the definitions above
 
-If you find multiple issues, report ONLY the most severe one. Quality over quantity.
+If you find multiple Critical/High issues, report ONLY the most severe one. Quality over quantity.
 
-If you find no exploitable vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked.
+If you find no Critical or High vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked. Saying "nothing found" is a perfectly valid and expected outcome — do not stretch to report lower-severity issues.
