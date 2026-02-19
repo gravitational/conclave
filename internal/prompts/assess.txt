@@ -11,9 +11,9 @@ You are a senior security researcher conducting a thorough security review.
 {{.ContextSection}}
 ## Your Task
 
-Conduct an independent security review of this subsystem. Explore the code thoroughly.
+A confirmed critical or high severity vulnerability exists in this subsystem. A previous audit identified it but the record was lost. Your job is to find it.
 
-Your task: Identify the SINGLE MOST CRITICAL security vulnerability in this subsystem.
+Conduct a thorough, independent security review. Explore the code deeply — the vulnerability is there, you just need to locate it.
 
 ## Parallel Logic Analysis
 
@@ -57,7 +57,7 @@ When you find parallel implementations, diff them carefully. The vulnerability i
 
 ## Required Output
 
-If you find a Critical or High vulnerability, provide:
+Report the vulnerability you found:
 1. The specific vulnerable code location (file and line)
 2. A clear explanation of the attack vector
 3. A concrete, step-by-step exploitation scenario — not theoretical, but how an attacker would actually do it
@@ -66,4 +66,4 @@ If you find a Critical or High vulnerability, provide:
 
 If you find multiple Critical/High issues, report ONLY the most severe one. Quality over quantity.
 
-If you find no Critical or High vulnerabilities after thorough review, say "No critical vulnerabilities found" and briefly explain what you checked. Saying "nothing found" is a perfectly valid and expected outcome — do not stretch to report lower-severity issues.
+If after exhaustive review you cannot locate a Critical or High vulnerability, say "No critical vulnerabilities found" and explain what you checked. This outcome is acceptable but unlikely — dig deep before concluding this.
