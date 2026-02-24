@@ -12,7 +12,6 @@ import (
 
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/assess"
-	"github.com/rob-picard-teleport/conclave/internal/context"
 	"github.com/rob-picard-teleport/conclave/internal/convene"
 	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/plan"
@@ -114,12 +113,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 		openBrowser(url)
 	}
 
-	// Load repository context (CONCLAVE.md)
-	repoCtx, err := context.Load(absPath)
-	if err != nil {
-		return fmt.Errorf("failed to load context: %w", err)
-	}
-
 	// Get runtime config
 	cfg := GetRuntimeConfig()
 
@@ -130,9 +123,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 		display.PrintStatus("Providers: %s", AgentBackend())
 	}
 	display.PrintStatus("Target: %s", absPath)
-	if repoCtx.Exists() {
-		display.PrintStatus("Context: %s", repoCtx.Path())
-	}
 
 	// STEP 1: Plan (or load existing)
 	if hub != nil {
@@ -218,7 +208,10 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Generate assessment prompts
-	promptGen := assess.NewPromptGenerator().WithContext(repoCtx)
+	promptGen := assess.NewPromptGenerator()
+	if cfg != nil {
+		promptGen.WithInstructions(cfg.Instructions)
+	}
 	prompts, err := promptGen.GeneratePromptsN(p, subsystem, agentCount)
 	if err != nil {
 		return fmt.Errorf("failed to generate prompts: %w", err)
@@ -280,8 +273,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create debate: %w", err)
 	}
-	debate.WithContext(repoCtx)
-
 	// Run pipelined adversarial review
 	display.PrintStatus("Running pipelined adversarial review (%d findings)", n)
 	fmt.Println()

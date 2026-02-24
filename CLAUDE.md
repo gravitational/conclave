@@ -55,7 +55,7 @@ internal/
   plan/                       Plan generation and parsing
   assess/                     Assessment prompt generation (focuses on single most critical finding)
   convene/                    Adversarial review orchestration (Steel Man/Critique/Judge/Synthesis)
-  context/                    CONCLAVE.md repository context management
+  config/                     Config file loading (~/.conclave/config.yaml)
   state/                      .conclave directory management, markdown+frontmatter persistence
   display/                    Terminal output formatting and status display
   web/                        WebSocket-based dashboard for real-time monitoring
@@ -120,17 +120,6 @@ All state is stored in `.conclave/` as markdown files with YAML frontmatter:
   debates/            {planID[:8]}/{subsystem}/debate-{n}.md - Debate round outputs
   results/            {planID[:8]}/{subsystem}.md - Final synthesized reports
 ```
-
-## Repository Context (CONCLAVE.md)
-
-The `CONCLAVE.md` file in target repos stores learned context:
-- Known false positives (patterns to ignore)
-- Focus areas (high-priority code paths)
-- Ignore patterns (paths to skip)
-- Subsystem-specific notes
-- Confirmed findings history
-
-This context is loaded and included in agent prompts to improve accuracy over time.
 
 ## Key Types
 

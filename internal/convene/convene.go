@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rob-picard-teleport/conclave/internal/context"
 	"github.com/rob-picard-teleport/conclave/internal/prompts"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
@@ -26,9 +25,8 @@ func FilterValidFindings(perspectives []state.Perspective) []state.Perspective {
 
 // Debate manages multi-round debates between agents
 type Debate struct {
-	context *context.RepoContext
-	plan    *state.Plan
-	sub     *state.Subsystem
+	plan *state.Plan
+	sub  *state.Subsystem
 }
 
 // DebateRound captures agent output with metadata for debate rounds
@@ -71,12 +69,6 @@ func NewDebate(plan *state.Plan, subsystem string) (*Debate, error) {
 	}
 
 	return &Debate{plan: plan, sub: sub}, nil
-}
-
-// WithContext sets the repository context
-func (d *Debate) WithContext(ctx *context.RepoContext) *Debate {
-	d.context = ctx
-	return d
 }
 
 // SteelManPrompts creates prompts for the steel man phase (advocate for each finding)

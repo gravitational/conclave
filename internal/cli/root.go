@@ -73,9 +73,12 @@ func initConfig(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// If CLI flags specified, they take precedence (skip profile)
+	// If CLI flags specified, they take precedence for providers (but still load instructions from config)
 	if len(enabledProviders()) > 0 {
 		runtimeConfig = buildRuntimeConfigFromCLI()
+		if runtimeConfig != nil && globalConfig != nil {
+			runtimeConfig.Instructions = globalConfig.Instructions
+		}
 		return nil
 	}
 
@@ -98,7 +101,7 @@ func initConfig(cmd *cobra.Command, args []string) error {
 			}
 			// No explicit profile and no "default" - fall through to CLI validation
 		} else {
-			runtimeConfig = config.NewRuntimeConfig(profile, verbose)
+			runtimeConfig = config.NewRuntimeConfig(globalConfig, profile, verbose)
 			return nil
 		}
 	} else if profileName != "" {

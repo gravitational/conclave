@@ -38,7 +38,8 @@ func LoadFrom(path string) (*Config, error) {
 
 // rawConfig is the intermediate structure for YAML unmarshaling
 type rawConfig struct {
-	Profiles map[string]rawProfile `yaml:"profiles"`
+	Instructions []string              `yaml:"instructions"`
+	Profiles     map[string]rawProfile `yaml:"profiles"`
 }
 
 type rawProfile struct {
@@ -62,6 +63,7 @@ func Parse(data []byte) (*Config, error) {
 	}
 
 	config := NewConfig()
+	config.Instructions = raw.Instructions
 
 	for name, rawProfile := range raw.Profiles {
 		profile := Profile{

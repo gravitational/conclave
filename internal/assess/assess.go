@@ -1,14 +1,13 @@
 package assess
 
 import (
-	"github.com/rob-picard-teleport/conclave/internal/context"
 	"github.com/rob-picard-teleport/conclave/internal/prompts"
 	"github.com/rob-picard-teleport/conclave/internal/state"
 )
 
 // PromptGenerator generates assessment prompts
 type PromptGenerator struct {
-	context *context.RepoContext
+	instructions []string
 }
 
 // NewPromptGenerator creates a new prompt generator
@@ -16,9 +15,9 @@ func NewPromptGenerator() *PromptGenerator {
 	return &PromptGenerator{}
 }
 
-// WithContext sets the repository context for prompts
-func (g *PromptGenerator) WithContext(ctx *context.RepoContext) *PromptGenerator {
-	g.context = ctx
+// WithInstructions sets custom instructions from config
+func (g *PromptGenerator) WithInstructions(instructions []string) *PromptGenerator {
+	g.instructions = instructions
 	return g
 }
 
@@ -30,18 +29,13 @@ func (g *PromptGenerator) GeneratePrompts(plan *state.Plan, subsystem *state.Sub
 
 // GeneratePromptsN creates n prompts for assessing a subsystem
 func (g *PromptGenerator) GeneratePromptsN(plan *state.Plan, subsystem *state.Subsystem, n int) ([]string, error) {
-	var generalContext, subsystemContext string
-	if g.context != nil {
-		generalContext = g.context.ForPrompt(false)
-		subsystemContext = g.context.ForSubsystemPrompt(subsystem.Slug)
-	}
-
 	contextSection := ""
-	if generalContext != "" {
-		contextSection += "\n" + generalContext + "\n"
-	}
-	if subsystemContext != "" {
-		contextSection += "\n" + subsystemContext + "\n"
+	if len(g.instructions) > 0 {
+		contextSection += "\n=== CUSTOM INSTRUCTIONS (follow these directives) ===\n"
+		for _, inst := range g.instructions {
+			contextSection += "- " + inst + "\n"
+		}
+		contextSection += "=== END CUSTOM INSTRUCTIONS ===\n"
 	}
 
 	prompt := prompts.Render(prompts.Assess, map[string]any{

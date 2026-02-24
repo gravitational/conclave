@@ -11,23 +11,25 @@ import (
 
 // RuntimeConfig holds the resolved configuration for a run
 type RuntimeConfig struct {
-	Verbose     bool
-	Stages      StageConfig
-	ProfileName string // Name of the profile being used, if any
+	Verbose      bool
+	Instructions []string
+	Stages       StageConfig
+	ProfileName  string // Name of the profile being used, if any
 }
 
-// NewRuntimeConfig creates a new RuntimeConfig from a profile
-func NewRuntimeConfig(profile *Profile, verbose bool) *RuntimeConfig {
-	if profile == nil {
-		return &RuntimeConfig{
-			Verbose: verbose,
-		}
+// NewRuntimeConfig creates a new RuntimeConfig from a config and profile
+func NewRuntimeConfig(cfg *Config, profile *Profile, verbose bool) *RuntimeConfig {
+	rc := &RuntimeConfig{
+		Verbose: verbose,
 	}
-	return &RuntimeConfig{
-		Verbose:     verbose,
-		Stages:      profile.Stages,
-		ProfileName: profile.Name,
+	if cfg != nil {
+		rc.Instructions = cfg.Instructions
 	}
+	if profile != nil {
+		rc.Stages = profile.Stages
+		rc.ProfileName = profile.Name
+	}
+	return rc
 }
 
 // IsConfigured returns true if the runtime config has valid stage configuration

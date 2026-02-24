@@ -35,7 +35,8 @@ type Profile struct {
 
 // Config represents the full configuration file
 type Config struct {
-	Profiles map[string]Profile
+	Instructions []string
+	Profiles     map[string]Profile
 }
 
 // NewConfig creates an empty Config

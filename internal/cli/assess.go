@@ -93,6 +93,9 @@ func runAssess(cmd *cobra.Command, args []string) error {
 
 	// Generate assessment prompts
 	promptGen := assess.NewPromptGenerator()
+	if cfg != nil {
+		promptGen.WithInstructions(cfg.Instructions)
+	}
 	prompts, err := promptGen.GeneratePromptsN(p, subsystem, agentCount)
 	if err != nil {
 		return fmt.Errorf("failed to generate assessment prompts: %w", err)
