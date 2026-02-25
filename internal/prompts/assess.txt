@@ -41,13 +41,13 @@ When you find parallel implementations, diff them carefully. The vulnerability i
 **High** — An attacker can achieve ANY of the following:
 - Stored XSS that executes in other users' sessions
 - IDOR/broken access control exposing other users' sensitive data
-- Server-Side Request Forgery (SSRF) reaching internal services
 - Credential leakage (hardcoded secrets, tokens in logs, exposed API keys)
 - Insecure deserialization with a viable gadget chain
 - Second-order injection (SQL, command, template) with a realistic trigger
 
 **NOT Critical or High** (do not report these):
 - Self-XSS, reflected XSS requiring unlikely user interaction
+- Server-Side Request Forgery (SSRF) reaching internal services
 - Missing rate limiting, CSRF tokens, or security headers
 - Denial of service without data exposure
 - Information disclosure of non-sensitive data (stack traces, version numbers)
