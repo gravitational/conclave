@@ -34,8 +34,9 @@ func toPerspectives(results []agent.AgentResult) []state.Perspective {
 }
 
 var (
-	useWeb     bool
-	createGist bool
+	useWeb       bool
+	createGist   bool
+	runSubsystem string
 )
 
 var runCmd = &cobra.Command{
@@ -56,6 +57,7 @@ This is equivalent to running: plan → assess → convene → complete`,
 func init() {
 	runCmd.Flags().BoolVar(&useWeb, "web", false, "Open web dashboard for monitoring")
 	runCmd.Flags().BoolVar(&createGist, "gist", false, "Create a secret gist of the final report")
+	runCmd.Flags().StringVar(&runSubsystem, "subsystem", "", "Specific subsystem slug to assess (defaults to random unreviewed)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -183,7 +185,18 @@ func runFull(cmd *cobra.Command, args []string) error {
 
 	rand.Seed(time.Now().UnixNano())
 	var subsystem *state.Subsystem
-	if len(unreviewed) > 0 {
+	if runSubsystem != "" {
+		// Use explicitly specified subsystem
+		for i := range p.Subsystems {
+			if p.Subsystems[i].Slug == runSubsystem {
+				subsystem = &p.Subsystems[i]
+				break
+			}
+		}
+		if subsystem == nil {
+			return fmt.Errorf("subsystem not found: %s", runSubsystem)
+		}
+	} else if len(unreviewed) > 0 {
 		// Pick from unreviewed subsystems
 		subsystem = unreviewed[rand.Intn(len(unreviewed))]
 		display.PrintStatus("Progress: %d/%d subsystems reviewed", len(reviewed), len(p.Subsystems))
