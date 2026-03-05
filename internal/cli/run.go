@@ -37,6 +37,7 @@ var (
 	useWeb       bool
 	createGist   bool
 	runSubsystem string
+	runTarget    string
 )
 
 var runCmd = &cobra.Command{
@@ -58,6 +59,7 @@ func init() {
 	runCmd.Flags().BoolVar(&useWeb, "web", false, "Open web dashboard for monitoring")
 	runCmd.Flags().BoolVar(&createGist, "gist", false, "Create a secret gist of the final report")
 	runCmd.Flags().StringVar(&runSubsystem, "subsystem", "", "Specific subsystem slug to assess (defaults to random unreviewed)")
+	runCmd.Flags().StringVar(&runTarget, "target", "", "Ad-hoc target description (skips plan step, e.g. \"look at the auth code\")")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -126,85 +128,113 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 	display.PrintStatus("Target: %s", absPath)
 
-	// STEP 1: Plan (or load existing)
-	if hub != nil {
-		hub.SetPhase("plan", "Analyzing codebase structure")
-	}
-	display.PrintHeader("STEP 1: PLAN")
-
-	// Create plan agent
-	var planAgent agent.Agent
-	if cfg != nil && cfg.IsConfigured() {
-		planAgent = cfg.PlanAgent()
-	} else {
-		planAgent = CreateAgent()
+	// Validate mutually exclusive flags
+	if runTarget != "" && runSubsystem != "" {
+		return fmt.Errorf("--target and --subsystem are mutually exclusive")
 	}
 
 	var p *state.Plan
-	p, err = st.LoadMostRecentPlan()
-	if err != nil {
-		display.PrintStatus("Creating new plan...")
-		generator := plan.NewGenerator(planAgent, st)
-		var streamResult agent.StreamSilentResult
-		if hub != nil {
-			output := agent.StreamSilentWithWeb(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase", hub)
-			streamResult = agent.StreamSilentResult{Content: output}
-		} else {
-			streamResult = agent.StreamSilentWithError(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase")
-		}
-		if streamResult.Error != nil {
-			return fmt.Errorf("agent error: %w", streamResult.Error)
-		}
-		p, err = generator.ParseAndSave(streamResult.Content, absPath)
-		if err != nil {
-			return fmt.Errorf("failed to generate plan: %w", err)
-		}
-		display.PrintSuccess("Plan created: %s", p.Name)
-	} else {
-		display.PrintSuccess("Using existing plan: %s", p.Name)
-	}
-	display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
+	var subsystem *state.Subsystem
 
-	// STEP 2: Assess subsystem (prioritize unreviewed)
+	if runTarget != "" {
+		// Ad-hoc target mode: skip plan, create synthetic plan + subsystem
+		display.PrintHeader("STEP 1: PLAN (ad-hoc)")
+		p = &state.Plan{
+			ID:           state.GenerateID(),
+			Name:         "ad-hoc-audit",
+			Created:      time.Now(),
+			CodebaseRoot: absPath,
+			Overview:     "Ad-hoc targeted audit: " + runTarget,
+			Subsystems: []state.Subsystem{{
+				Slug:         "target",
+				Name:         "Ad-hoc Target",
+				Paths:        ".",
+				Description:  runTarget,
+				Interactions: "Unknown - ad-hoc audit",
+			}},
+		}
+		subsystem = &p.Subsystems[0]
+		display.PrintSuccess("Ad-hoc target: %s", runTarget)
+	} else {
+		// STEP 1: Plan (or load existing)
+		if hub != nil {
+			hub.SetPhase("plan", "Analyzing codebase structure")
+		}
+		display.PrintHeader("STEP 1: PLAN")
+
+		// Create plan agent
+		var planAgent agent.Agent
+		if cfg != nil && cfg.IsConfigured() {
+			planAgent = cfg.PlanAgent()
+		} else {
+			planAgent = CreateAgent()
+		}
+
+		p, err = st.LoadMostRecentPlan()
+		if err != nil {
+			display.PrintStatus("Creating new plan...")
+			generator := plan.NewGenerator(planAgent, st)
+			var streamResult agent.StreamSilentResult
+			if hub != nil {
+				output := agent.StreamSilentWithWeb(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase", hub)
+				streamResult = agent.StreamSilentResult{Content: output}
+			} else {
+				streamResult = agent.StreamSilentWithError(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase")
+			}
+			if streamResult.Error != nil {
+				return fmt.Errorf("agent error: %w", streamResult.Error)
+			}
+			p, err = generator.ParseAndSave(streamResult.Content, absPath)
+			if err != nil {
+				return fmt.Errorf("failed to generate plan: %w", err)
+			}
+			display.PrintSuccess("Plan created: %s", p.Name)
+		} else {
+			display.PrintSuccess("Using existing plan: %s", p.Name)
+		}
+		display.PrintStatus("Subsystems: %d identified", len(p.Subsystems))
+
+		// Select subsystem
+		// Find subsystems that haven't been reviewed yet
+		var unreviewed []*state.Subsystem
+		var reviewed []string
+		for i := range p.Subsystems {
+			sub := &p.Subsystems[i]
+			if result, _ := st.LoadResult(p.ID, sub.Slug); result == "" {
+				unreviewed = append(unreviewed, sub)
+			} else {
+				reviewed = append(reviewed, sub.Name)
+			}
+		}
+
+		rand.Seed(time.Now().UnixNano())
+		if runSubsystem != "" {
+			// Use explicitly specified subsystem
+			for i := range p.Subsystems {
+				if p.Subsystems[i].Slug == runSubsystem {
+					subsystem = &p.Subsystems[i]
+					break
+				}
+			}
+			if subsystem == nil {
+				return fmt.Errorf("subsystem not found: %s", runSubsystem)
+			}
+		} else if len(unreviewed) > 0 {
+			// Pick from unreviewed subsystems
+			subsystem = unreviewed[rand.Intn(len(unreviewed))]
+			display.PrintStatus("Progress: %d/%d subsystems reviewed", len(reviewed), len(p.Subsystems))
+		} else {
+			// All reviewed - pick any for re-review
+			subsystem = &p.Subsystems[rand.Intn(len(p.Subsystems))]
+			display.PrintStatus("All %d subsystems reviewed - re-reviewing", len(p.Subsystems))
+		}
+	}
+
+	// STEP 2: Assess subsystem
 	if hub != nil {
 		hub.SetPhase("assess", "Security assessment in progress")
 	}
 	display.PrintHeader("STEP 2: ASSESS")
-
-	// Find subsystems that haven't been reviewed yet
-	var unreviewed []*state.Subsystem
-	var reviewed []string
-	for i := range p.Subsystems {
-		sub := &p.Subsystems[i]
-		if result, _ := st.LoadResult(p.ID, sub.Slug); result == "" {
-			unreviewed = append(unreviewed, sub)
-		} else {
-			reviewed = append(reviewed, sub.Name)
-		}
-	}
-
-	rand.Seed(time.Now().UnixNano())
-	var subsystem *state.Subsystem
-	if runSubsystem != "" {
-		// Use explicitly specified subsystem
-		for i := range p.Subsystems {
-			if p.Subsystems[i].Slug == runSubsystem {
-				subsystem = &p.Subsystems[i]
-				break
-			}
-		}
-		if subsystem == nil {
-			return fmt.Errorf("subsystem not found: %s", runSubsystem)
-		}
-	} else if len(unreviewed) > 0 {
-		// Pick from unreviewed subsystems
-		subsystem = unreviewed[rand.Intn(len(unreviewed))]
-		display.PrintStatus("Progress: %d/%d subsystems reviewed", len(reviewed), len(p.Subsystems))
-	} else {
-		// All reviewed - pick any for re-review
-		subsystem = &p.Subsystems[rand.Intn(len(p.Subsystems))]
-		display.PrintStatus("All %d subsystems reviewed - re-reviewing", len(p.Subsystems))
-	}
 	display.PrintStatus("Target subsystem: %s", subsystem.Name)
 	fmt.Println()
 
