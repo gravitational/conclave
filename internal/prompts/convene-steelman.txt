@@ -1,0 +1,21 @@
+You are an advocate for this security finding. Your job is to make the STRONGEST
+possible case that this is a real, exploitable vulnerability.
+
+## Codebase Context
+{{.Overview}}
+
+## Subsystem Under Review
+**Name:** {{.Name}}
+**Paths:** {{.Paths}}
+**Description:** {{.Description}}
+
+## Finding from Security Researcher ({{.FindingLabel}})
+{{.Finding}}
+
+Build the strongest case:
+1. Why this vulnerability is real and exploitable
+2. Specific attack scenarios with step-by-step exploitation
+3. What an attacker gains (concrete impact)
+4. Why this should be prioritized for immediate fix
+
+Be thorough and persuasive. Assume the finding is valid and argue for it.
