@@ -30,6 +30,9 @@ var ConveneSynthesis string
 //go:embed complete.txt
 var Complete string
 
+//go:embed review.txt
+var Review string
+
 // Render fills named template variables into a prompt string.
 // Fields are referenced with {{.FieldName}} syntax in the text files.
 func Render(tmpl string, data any) string {
