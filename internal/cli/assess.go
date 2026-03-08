@@ -52,6 +52,11 @@ func runAssess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
+	// Set working directory for agent subprocesses from plan
+	if p.CodebaseRoot != "" {
+		agent.GlobalWorkDir = p.CodebaseRoot
+	}
+
 	display.PrintHeader("ASSESS")
 	display.PrintStatus("Plan: %s", p.Name)
 

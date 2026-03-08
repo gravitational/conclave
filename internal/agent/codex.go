@@ -63,6 +63,9 @@ func (a *CodexAgent) Run(ctx context.Context, prompt string) (<-chan string, <-c
 		codexArgs += " -"
 
 		cmd := exec.CommandContext(ctx, "bash", "-lc", codexArgs)
+		if GlobalWorkDir != "" {
+			cmd.Dir = GlobalWorkDir
+		}
 		cmd.Stdin = strings.NewReader(prompt)
 
 		stdout, err := cmd.StdoutPipe()
