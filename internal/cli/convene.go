@@ -95,6 +95,11 @@ func runConvene(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
+	// Set working directory for agent subprocesses from plan
+	if p.CodebaseRoot != "" {
+		agent.GlobalWorkDir = p.CodebaseRoot
+	}
+
 	display.PrintHeader("CONVENE")
 	display.PrintStatus("Plan: %s", p.Name)
 	display.PrintStatus("Subsystem: %s", conveneSubsystem)
