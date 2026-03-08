@@ -14,6 +14,10 @@ type Agent interface {
 	Name() string
 }
 
+// GlobalWorkDir is the target codebase directory for agent subprocesses.
+// Set this before running agents to ensure they operate on the correct codebase.
+var GlobalWorkDir string
+
 // shellQuote quotes a string for safe use in shell commands
 func shellQuote(s string) string {
 	// Use single quotes and escape any single quotes in the string

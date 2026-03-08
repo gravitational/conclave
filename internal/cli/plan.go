@@ -52,6 +52,9 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", absPath)
 	}
 
+	// Set working directory for all agent subprocesses
+	agent.GlobalWorkDir = absPath
+
 	// Initialize state directory
 	st, err := state.New(absPath)
 	if err != nil {

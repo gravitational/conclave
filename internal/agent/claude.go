@@ -102,6 +102,9 @@ func (a *ClaudeAgent) Run(ctx context.Context, prompt string) (<-chan string, <-
 		claudeArgs += " -p " + shellQuote(prompt)
 
 		cmd := exec.CommandContext(ctx, "bash", "-lc", claudeArgs)
+		if GlobalWorkDir != "" {
+			cmd.Dir = GlobalWorkDir
+		}
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
