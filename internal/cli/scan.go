@@ -12,12 +12,10 @@ import (
 	"github.com/rob-picard-teleport/conclave/internal/agent"
 	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/scan"
-	"github.com/rob-picard-teleport/conclave/internal/web"
 	"github.com/spf13/cobra"
 )
 
 var (
-	scanUseWeb     bool
 	scanCreateGist bool
 )
 
@@ -48,7 +46,6 @@ Examples:
 }
 
 func init() {
-	scanCmd.Flags().BoolVar(&scanUseWeb, "web", false, "Open web dashboard for monitoring")
 	scanCmd.Flags().BoolVar(&scanCreateGist, "gist", false, "Create a secret gist of the final report")
 	rootCmd.AddCommand(scanCmd)
 }
@@ -56,33 +53,13 @@ func init() {
 func runScan(cmd *cobra.Command, args []string) error {
 	input := args[0]
 
-	// Start web dashboard if requested
-	var hub *web.Hub
-	if scanUseWeb {
-		hub = web.NewHub()
-		hub.SetControllers(
-			agent.GlobalRegistry.Kill,
-			agent.GlobalRegistry.KillAll,
-		)
-		go hub.Run()
-
-		server := web.NewServer(hub)
-		url, err := server.Start()
-		if err != nil {
-			return fmt.Errorf("failed to start web server: %w", err)
-		}
-
-		fmt.Printf("\n  Dashboard: %s\n\n", url)
-		openBrowser(url)
-	}
-
 	// Detect if this is a PR URL - if so, use PR diff scan mode
 	if isPullRequestURL(input) {
-		return runPRScan(input, hub)
+		return runPRScan(input)
 	}
 
 	// Otherwise, use vulnerability regression scan mode
-	return runVulnScan(input, hub)
+	return runVulnScan(input)
 }
 
 // isPullRequestURL checks if the input is a GitHub PR URL
@@ -91,16 +68,13 @@ func isPullRequestURL(input string) bool {
 }
 
 // runPRScan scans the specific changes in a pull request
-func runPRScan(prURL string, hub *web.Hub) error {
+func runPRScan(prURL string) error {
 	display.PrintHeader("PR SECURITY SCAN")
 	display.PrintStatus("Providers: %s", AgentBackend())
 	display.PrintStatus("PR: %s", prURL)
 	fmt.Println()
 
 	// Step 1: Load PR info and diff
-	if hub != nil {
-		hub.SetPhase("load", "Loading PR information")
-	}
 	display.PrintStatus("Step 1: Loading PR information...")
 
 	prInfo, err := loadPRInfo(prURL)
@@ -115,18 +89,10 @@ func runPRScan(prURL string, hub *web.Hub) error {
 	fmt.Println()
 
 	// Step 2: Threat Model
-	if hub != nil {
-		hub.SetPhase("threat-model", "Threat modeling PR")
-	}
 	display.PrintHeader("STEP 2: THREAT MODEL")
 
 	threatModelPrompt := scan.ThreatModelPrompt(prInfo)
-	var tmOutput string
-	if hub != nil {
-		tmOutput = agent.StreamSilentWithWeb(CreateAgent(), threatModelPrompt, "Analyzing threats", hub)
-	} else {
-		tmOutput = agent.StreamSilent(CreateAgent(), threatModelPrompt, "Analyzing threats")
-	}
+	tmOutput := agent.StreamSilent(CreateAgent(), threatModelPrompt, "Analyzing threats")
 
 	threatModel := scan.ParseThreatModel(tmOutput)
 	display.PrintSuccess("Threat Model:")
@@ -144,9 +110,6 @@ func runPRScan(prURL string, hub *web.Hub) error {
 	fmt.Println()
 
 	// Step 3: Run 3 scan agents in parallel, guided by threat model
-	if hub != nil {
-		hub.SetPhase("scan", "Investigating threats")
-	}
 	display.PrintHeader("STEP 3: SECURITY REVIEW")
 	display.PrintStatus("Running 3 reviewers guided by threat model...")
 	fmt.Println()
@@ -155,12 +118,7 @@ func runPRScan(prURL string, hub *web.Hub) error {
 	agents := DistributeAgents(3)
 	names := []string{"Threat Investigation", "Data Flow Analysis", "Context Review"}
 
-	var results []agent.AgentResult
-	if hub != nil {
-		results = agent.StreamMultipleWithWeb(agents, prompts, names, hub)
-	} else {
-		results = agent.StreamMultipleWithStatus(agents, prompts, names)
-	}
+	results := agent.StreamMultipleWithStatus(agents, prompts, names)
 
 	fmt.Println()
 	display.PrintSuccess("Review complete")
@@ -172,18 +130,10 @@ func runPRScan(prURL string, hub *web.Hub) error {
 	}
 
 	// Step 4: Synthesize report
-	if hub != nil {
-		hub.SetPhase("synthesize", "Synthesizing report")
-	}
 	display.PrintHeader("STEP 4: SYNTHESIZE")
 
 	synthesisPrompt := scan.PRSynthesisPrompt(prInfo, threatModel, findings)
-	var report string
-	if hub != nil {
-		report = agent.StreamSilentWithWeb(CreateAgent(), synthesisPrompt, "Synthesizing final report", hub)
-	} else {
-		report = agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
-	}
+	report := agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
 
 	fmt.Println()
 
@@ -201,13 +151,6 @@ func runPRScan(prURL string, hub *web.Hub) error {
 		} else {
 			display.PrintSuccess("Gist: %s", gistURL)
 		}
-	}
-
-	// Keep web server running if dashboard is open
-	if scanUseWeb {
-		fmt.Println()
-		display.PrintStatus("Dashboard still running. Press Ctrl+C to exit.")
-		select {}
 	}
 
 	return nil
@@ -335,16 +278,13 @@ func extractJSONArray(json, key string) []string {
 }
 
 // runVulnScan runs the vulnerability regression scan mode
-func runVulnScan(input string, hub *web.Hub) error {
+func runVulnScan(input string) error {
 	display.PrintHeader("VULNERABILITY SCAN")
 	display.PrintStatus("Providers: %s", AgentBackend())
 	display.PrintStatus("Input: %s", input)
 	fmt.Println()
 
 	// Step 1: Load content
-	if hub != nil {
-		hub.SetPhase("load", "Loading vulnerability information")
-	}
 	display.PrintStatus("Step 1: Loading vulnerability information...")
 
 	content, err := loadInput(input)
@@ -355,18 +295,9 @@ func runVulnScan(input string, hub *web.Hub) error {
 	fmt.Println()
 
 	// Step 2: Analyze to extract profile
-	if hub != nil {
-		hub.SetPhase("analyze", "Analyzing vulnerability")
-	}
 	display.PrintHeader("STEP 2: ANALYZE")
 
-	var profile *scan.VulnProfile
-	if hub != nil {
-		output := agent.StreamSilentWithWeb(CreateAgent(), buildAnalyzePrompt(content), "Analyzing vulnerability", hub)
-		profile, err = parseProfileFromOutput(output, content)
-	} else {
-		profile, err = scan.Analyze(CreateAgent(), content)
-	}
+	profile, err := scan.Analyze(CreateAgent(), content)
 	if err != nil {
 		return fmt.Errorf("failed to analyze vulnerability: %w", err)
 	}
@@ -381,9 +312,6 @@ func runVulnScan(input string, hub *web.Hub) error {
 	fmt.Println()
 
 	// Step 3: Run 3 scan agents in parallel
-	if hub != nil {
-		hub.SetPhase("scan", "Scanning codebase")
-	}
 	display.PrintHeader("STEP 3: SCAN")
 	display.PrintStatus("Running 3 scan agents in parallel...")
 	fmt.Println()
@@ -392,12 +320,7 @@ func runVulnScan(input string, hub *web.Hub) error {
 	agents := DistributeAgents(3)
 	names := []string{"Regression Check", "Variant Scan", "Deep Analysis"}
 
-	var results []agent.AgentResult
-	if hub != nil {
-		results = agent.StreamMultipleWithWeb(agents, prompts, names, hub)
-	} else {
-		results = agent.StreamMultipleWithStatus(agents, prompts, names)
-	}
+	results := agent.StreamMultipleWithStatus(agents, prompts, names)
 
 	fmt.Println()
 	display.PrintSuccess("Scan complete")
@@ -409,18 +332,10 @@ func runVulnScan(input string, hub *web.Hub) error {
 	}
 
 	// Step 4: Synthesize report
-	if hub != nil {
-		hub.SetPhase("synthesize", "Synthesizing report")
-	}
 	display.PrintHeader("STEP 4: SYNTHESIZE")
 
 	synthesisPrompt := scan.SynthesisPrompt(profile, findings)
-	var report string
-	if hub != nil {
-		report = agent.StreamSilentWithWeb(CreateAgent(), synthesisPrompt, "Synthesizing final report", hub)
-	} else {
-		report = agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
-	}
+	report := agent.StreamSilent(CreateAgent(), synthesisPrompt, "Synthesizing final report")
 
 	fmt.Println()
 
@@ -438,13 +353,6 @@ func runVulnScan(input string, hub *web.Hub) error {
 		} else {
 			display.PrintSuccess("Gist: %s", gistURL)
 		}
-	}
-
-	// Keep web server running if dashboard is open
-	if scanUseWeb {
-		fmt.Println()
-		display.PrintStatus("Dashboard still running. Press Ctrl+C to exit.")
-		select {}
 	}
 
 	return nil
@@ -532,80 +440,6 @@ func loadWithHTTP(url string) (string, error) {
 	}
 
 	return string(body), nil
-}
-
-// buildAnalyzePrompt creates the prompt for vulnerability analysis
-func buildAnalyzePrompt(content string) string {
-	return fmt.Sprintf(`You are analyzing a security vulnerability report to extract key information for scanning a codebase.
-
-## Input Content
-%s
-
-## Your Task
-Extract a structured vulnerability profile from the above content. Identify:
-1. What type of vulnerability this is (e.g., SQL Injection, XSS, Command Injection, Path Traversal, Auth Bypass, etc.)
-2. What code pattern or anti-pattern was vulnerable
-3. Which files were originally affected (if mentioned)
-4. How the fix was implemented (if mentioned)
-
-Output your analysis in this exact format:
-
----TITLE---
-<brief title describing the vulnerability>
----TYPE---
-<vulnerability type>
----PATTERN---
-<description of the vulnerable code pattern to search for>
----FILES---
-<comma-separated list of affected files, or "unknown" if not specified>
----FIX---
-<how it was fixed, or "unknown" if not specified>
----END---
-`, content)
-}
-
-// parseProfileFromOutput extracts a VulnProfile from agent output
-func parseProfileFromOutput(output, rawContent string) (*scan.VulnProfile, error) {
-	profile := &scan.VulnProfile{
-		RawContent: rawContent,
-	}
-
-	profile.Title = extractSection(output, "---TITLE---", "---TYPE---")
-	profile.Type = extractSection(output, "---TYPE---", "---PATTERN---")
-	profile.Pattern = extractSection(output, "---PATTERN---", "---FILES---")
-	filesStr := extractSection(output, "---FILES---", "---FIX---")
-	profile.FixApproach = extractSection(output, "---FIX---", "---END---")
-
-	if filesStr != "" && filesStr != "unknown" {
-		for _, f := range strings.Split(filesStr, ",") {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				profile.Files = append(profile.Files, f)
-			}
-		}
-	}
-
-	if profile.Type == "" && profile.Pattern == "" {
-		return nil, fmt.Errorf("failed to extract vulnerability profile from content")
-	}
-
-	return profile, nil
-}
-
-// extractSection extracts content between two markers
-func extractSection(output, startMarker, endMarker string) string {
-	startIdx := strings.Index(output, startMarker)
-	if startIdx == -1 {
-		return ""
-	}
-	startIdx += len(startMarker)
-
-	endIdx := strings.Index(output[startIdx:], endMarker)
-	if endIdx == -1 {
-		return strings.TrimSpace(output[startIdx:])
-	}
-
-	return strings.TrimSpace(output[startIdx : startIdx+endIdx])
 }
 
 // truncateString limits string length for display

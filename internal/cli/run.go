@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/plan"
 	"github.com/rob-picard-teleport/conclave/internal/state"
-	"github.com/rob-picard-teleport/conclave/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +32,6 @@ func toPerspectives(results []agent.AgentResult) []state.Perspective {
 }
 
 var (
-	useWeb       bool
 	createGist   bool
 	runSubsystem string
 	runTarget    string
@@ -56,7 +53,6 @@ This is equivalent to running: plan → assess → convene → complete`,
 }
 
 func init() {
-	runCmd.Flags().BoolVar(&useWeb, "web", false, "Open web dashboard for monitoring")
 	runCmd.Flags().BoolVar(&createGist, "gist", false, "Create a secret gist of the final report")
 	runCmd.Flags().StringVar(&runSubsystem, "subsystem", "", "Specific subsystem slug to assess (defaults to random unreviewed)")
 	runCmd.Flags().StringVar(&runTarget, "target", "", "Ad-hoc target description (skips plan step, e.g. \"look at the auth code\")")
@@ -91,31 +87,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 
 	// Reset session usage tracking
 	agent.GlobalSession.Reset()
-
-	// Start web dashboard if requested
-	var hub *web.Hub
-	if useWeb {
-		hub = web.NewHub()
-
-		// Wire up agent control functions
-		hub.SetControllers(
-			agent.GlobalRegistry.Kill,
-			agent.GlobalRegistry.KillAll,
-		)
-
-		go hub.Run()
-
-		server := web.NewServer(hub)
-		url, err := server.Start()
-		if err != nil {
-			return fmt.Errorf("failed to start web server: %w", err)
-		}
-
-		fmt.Printf("\n  Dashboard: %s\n\n", url)
-
-		// Try to open browser
-		openBrowser(url)
-	}
 
 	// Get runtime config
 	cfg := GetRuntimeConfig()
@@ -157,9 +128,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 		display.PrintSuccess("Ad-hoc target: %s", runTarget)
 	} else {
 		// STEP 1: Plan (or load existing)
-		if hub != nil {
-			hub.SetPhase("plan", "Analyzing codebase structure")
-		}
 		display.PrintHeader("STEP 1: PLAN")
 
 		// Create plan agent
@@ -174,13 +142,7 @@ func runFull(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			display.PrintStatus("Creating new plan...")
 			generator := plan.NewGenerator(planAgent, st)
-			var streamResult agent.StreamSilentResult
-			if hub != nil {
-				output := agent.StreamSilentWithWeb(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase", hub)
-				streamResult = agent.StreamSilentResult{Content: output}
-			} else {
-				streamResult = agent.StreamSilentWithError(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase")
-			}
+			streamResult := agent.StreamSilentWithError(planAgent, generator.BuildPrompt(absPath), "Analyzing codebase")
 			if streamResult.Error != nil {
 				return fmt.Errorf("agent error: %w", streamResult.Error)
 			}
@@ -231,9 +193,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// STEP 2: Assess subsystem
-	if hub != nil {
-		hub.SetPhase("assess", "Security assessment in progress")
-	}
 	display.PrintHeader("STEP 2: ASSESS")
 	display.PrintStatus("Target subsystem: %s", subsystem.Name)
 	fmt.Println()
@@ -273,12 +232,7 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run assessment agents
-	var assessResults []agent.AgentResult
-	if hub != nil {
-		assessResults = agent.StreamMultipleWithWeb(assessAgents, prompts, names, hub)
-	} else {
-		assessResults = agent.StreamMultipleWithStatus(assessAgents, prompts, names)
-	}
+	assessResults := agent.StreamMultipleWithStatus(assessAgents, prompts, names)
 
 	// Convert to perspectives and save with agent metadata
 	perspectives := toPerspectives(assessResults)
@@ -327,16 +281,12 @@ func runFull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Configure pipeline
-	var pipelineDisplay *display.PipelineDisplay
-	if hub == nil {
-		pipelineDisplay = display.NewPipelineDisplay(n, findingLabels)
-	}
+	pipelineDisplay := display.NewPipelineDisplay(n, findingLabels)
 
 	// Build pipeline config with phase-specific creators if available
 	pipelineCfg := agent.PipelineConfig{
 		Debate:   debate,
 		Findings: findings,
-		Hub:      hub,
 		Display:  pipelineDisplay,
 	}
 
@@ -378,9 +328,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintStatus("Verdicts: %d RAISE, %d DISMISS", raiseCount, dismissCount)
 
 	// Phase 4: Synthesis
-	if hub != nil {
-		hub.SetPhase("synthesize", "Phase 4: Synthesis")
-	}
 	display.PrintStatus("Phase 4: Synthesis")
 	synthesisPrompt := debate.SynthesisPrompt(findings, steelMen, critiques, judges)
 
@@ -392,12 +339,7 @@ func runFull(cmd *cobra.Command, args []string) error {
 		synthesisAgent = CreateAgent()
 	}
 
-	var result string
-	if hub != nil {
-		result = agent.StreamSilentWithWeb(synthesisAgent, synthesisPrompt, "Synthesizing final report", hub)
-	} else {
-		result = agent.StreamSilent(synthesisAgent, synthesisPrompt, "Synthesizing final report")
-	}
+	result := agent.StreamSilent(synthesisAgent, synthesisPrompt, "Synthesizing final report")
 
 	// Save result
 	resultPath, err := st.SaveResult(p.ID, subsystem.Slug, result)
@@ -410,7 +352,7 @@ func runFull(cmd *cobra.Command, args []string) error {
 	display.PrintSuccess("Results: %s", resultPath)
 
 	// Print session usage summary
-	printSessionUsageSummary(hub)
+	printSessionUsageSummary()
 
 	// Create gist if requested
 	if createGist {
@@ -422,13 +364,6 @@ func runFull(cmd *cobra.Command, args []string) error {
 		} else {
 			display.PrintSuccess("Gist: %s", gistURL)
 		}
-	}
-
-	// Keep web server running if dashboard is open
-	if useWeb {
-		fmt.Println()
-		display.PrintStatus("Dashboard still running. Press Ctrl+C to exit.")
-		select {} // Block forever
 	}
 
 	return nil
@@ -451,23 +386,8 @@ func createSecretGist(filePath, subsystemName string) (string, error) {
 	return gistURL, nil
 }
 
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		return
-	}
-	cmd.Start()
-}
-
 // printSessionUsageSummary prints a summary of token usage for the session
-func printSessionUsageSummary(hub *web.Hub) {
+func printSessionUsageSummary() {
 	total := agent.GlobalSession.GetTotal()
 
 	// Skip if no usage recorded
@@ -491,28 +411,6 @@ func printSessionUsageSummary(hub *web.Hub) {
 				formatTokenCount(usage.TotalTokens),
 				usage.CostUSD)
 		}
-	}
-
-	// Broadcast to web hub if available
-	if hub != nil {
-		webData := web.SessionUsageData{
-			ByAgent: make(map[string]web.UsageData),
-			Total: web.UsageData{
-				InputTokens:  total.InputTokens,
-				OutputTokens: total.OutputTokens,
-				TotalTokens:  total.TotalTokens,
-				CostUSD:      total.CostUSD,
-			},
-		}
-		for key, usage := range byAgent {
-			webData.ByAgent[key] = web.UsageData{
-				InputTokens:  usage.InputTokens,
-				OutputTokens: usage.OutputTokens,
-				TotalTokens:  usage.TotalTokens,
-				CostUSD:      usage.CostUSD,
-			}
-		}
-		hub.BroadcastSessionUsage(webData)
 	}
 }
 

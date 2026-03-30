@@ -38,7 +38,6 @@ conclave --claude complete --subsystem X  # Synthesize final results
 conclave status                       # Show analysis state
 
 # Additional flags
-conclave --claude run --web           # Open web dashboard for real-time monitoring
 conclave --claude run --gist          # Create secret GitHub gist of final report
 
 # Codex reasoning effort (low, medium, high, xhigh)
@@ -58,7 +57,6 @@ internal/
   config/                     Config file loading (~/.conclave/config.yaml)
   state/                      .conclave directory management, markdown+frontmatter persistence
   display/                    Terminal output formatting and status display
-  web/                        WebSocket-based dashboard for real-time monitoring
 ```
 
 ## Adversarial Review Flow (Convene)

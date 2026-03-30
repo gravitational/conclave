@@ -5,24 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
-	"unicode"
 
 	"github.com/rob-picard-teleport/conclave/internal/convene"
 	"github.com/rob-picard-teleport/conclave/internal/display"
 	"github.com/rob-picard-teleport/conclave/internal/state"
-	"github.com/rob-picard-teleport/conclave/internal/web"
 )
-
-// capitalize returns the string with the first letter uppercased
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	r := []rune(s)
-	r[0] = unicode.ToUpper(r[0])
-	return string(r)
-}
 
 // Phase constants for pipeline
 const (
@@ -47,7 +34,6 @@ type PipelineConfig struct {
 	Debate      *convene.Debate
 	Findings    []state.Perspective
 	CreateAgent func() Agent // Legacy fallback - used if phase-specific creators not set
-	Hub         *web.Hub             // optional, for web mode
 	Display     *display.PipelineDisplay // optional, for terminal mode
 
 	// Phase-specific agent creators (optional - falls back to CreateAgent)
@@ -55,9 +41,6 @@ type PipelineConfig struct {
 	CreateCritiqueAgent func() Agent
 	CreateJudgeAgent    func() Agent
 }
-
-// PipelineCallback is called when a finding changes phase
-type PipelineCallback func(findingIdx int, phase string, agent *web.AgentStatusData)
 
 // getAgentForPhase returns the appropriate agent for a pipeline phase
 func getAgentForPhase(cfg PipelineConfig, phase string) Agent {
@@ -123,15 +106,6 @@ func RunPipelinedDebate(cfg PipelineConfig) []FindingPipeline {
 
 	// Clear registry for fresh run
 	GlobalRegistry.Clear()
-
-	// Notify web hub of pipeline mode
-	if cfg.Hub != nil {
-		labels := make([]string, n)
-		for i, finding := range cfg.Findings {
-			labels[i] = fmt.Sprintf("Finding %d (%s)", i+1, findingLabel(finding))
-		}
-		cfg.Hub.SetPipelineMode(labels)
-	}
 
 	// Start pipeline display if in terminal mode
 	if cfg.Display != nil {
@@ -209,10 +183,6 @@ func runFindingPipeline(cfg PipelineConfig, findingIdx int) FindingPipeline {
 	result.Judge = judgeResult
 
 	// Notify completion
-	if cfg.Hub != nil {
-		verdict := extractVerdict(judgeResult.Content)
-		cfg.Hub.CompleteFinding(findingIdx, verdict)
-	}
 	if cfg.Display != nil {
 		verdict := extractVerdict(judgeResult.Content)
 		cfg.Display.SetDone(findingIdx, verdict)
@@ -240,21 +210,7 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 	GlobalRegistry.Register(id, name, ag.Name(), model, cancel)
 	defer GlobalRegistry.Unregister(id)
 
-	startTime := time.Now()
-
 	// Notify phase start
-	if cfg.Hub != nil {
-		cfg.Hub.UpdateFindingPhase(findingIdx, phase, &web.AgentStatusData{
-			ID:        id,
-			Name:      name,
-			Provider:  capitalize(ag.Name()),
-			Model:     model,
-			State:     "running",
-			Activity:  "Starting...",
-			Lines:     0,
-			StartTime: startTime,
-		})
-	}
 	if cfg.Display != nil {
 		cfg.Display.SetPhase(findingIdx, phase, ag.Name(), model)
 	}
@@ -263,32 +219,11 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 	output, errCh := ag.Run(ctx, prompt)
 
 	var result strings.Builder
-	lineCount := 0
 
 	for line := range output {
 		result.WriteString(line)
 		result.WriteString("\n")
-		lineCount++
 
-		if cfg.Hub != nil {
-			cfg.Hub.AddLog(id, line)
-
-			activity := extractActivity(line)
-			if activity == "" {
-				activity = fmt.Sprintf("Processing... (%d lines)", lineCount)
-			}
-
-			cfg.Hub.UpdateAgent(&web.AgentStatusData{
-				ID:        id,
-				Name:      name,
-				Provider:  capitalize(ag.Name()),
-				Model:     model,
-				State:     "running",
-				Activity:  activity,
-				Lines:     lineCount,
-				StartTime: startTime,
-			})
-		}
 		if cfg.Display != nil {
 			activity := extractActivity(line)
 			if activity != "" {
@@ -297,29 +232,7 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 		}
 	}
 
-	endTime := time.Now()
 	if err := <-errCh; err != nil {
-		// Check if this was a cancellation (kill)
-		errState := "error"
-		errStr := err.Error()
-		if ctx.Err() == context.Canceled {
-			errState = "killed"
-			errStr = "Killed by user"
-		}
-		if cfg.Hub != nil {
-			cfg.Hub.UpdateAgent(&web.AgentStatusData{
-				ID:        id,
-				Name:      name,
-				Provider:  capitalize(ag.Name()),
-				Model:     model,
-				State:     errState,
-				Activity:  errStr,
-				Lines:     lineCount,
-				StartTime: startTime,
-				EndTime:   &endTime,
-				Error:     errStr,
-			})
-		}
 		if cfg.Display != nil {
 			cfg.Display.SetError(findingIdx, err)
 		}
@@ -328,20 +241,6 @@ func runPipelinePhase(cfg PipelineConfig, findingIdx int, phase string, promptFn
 
 	// Extract and record usage
 	usage := extractAndRecordUsage(ag)
-
-	if cfg.Hub != nil {
-		cfg.Hub.UpdateAgent(&web.AgentStatusData{
-			ID:        id,
-			Name:      name,
-			Provider:  capitalize(ag.Name()),
-			Model:     model,
-			State:     "done",
-			Activity:  "Complete",
-			Lines:     lineCount,
-			StartTime: startTime,
-			EndTime:   &endTime,
-		})
-	}
 
 	return AgentResult{
 		Content: result.String(),

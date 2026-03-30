@@ -153,7 +153,6 @@ func runConvene(cmd *cobra.Command, args []string) error {
 	pipelineCfg := agent.PipelineConfig{
 		Debate:   debate,
 		Findings: findings,
-		Hub:      nil, // No web dashboard in convene command
 		Display:  pipelineDisplay,
 	}
 
